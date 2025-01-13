@@ -69,29 +69,29 @@ def main():
     
     # Create logger
     logger = Logger(
-        log_path=cfg["log_path"],
-        exp_name=cfg["exp_name"],
+        log_path=cfg.log_path,
+        exp_name=cfg.exp_name,
         save=True  # saving logs to file
     )
     # Log configuration
-    logger.log_config(cfg)
+    logger.log_config(vars(cfg))
     
     # 1) Prepare LR images from HR
-    logger.log("[Stage 1] Preparing Low-Resolution Images")
+    logger.log("[Stage 1]  Preparing Low-Resolution Images")
     prepare_low_res_images(cfg, logger)
     
     # 2) Generate teacher outputs
-    logger.log("[Stage 2] Generating Teacher Outputs")
+    logger.log("[Stage 2]  Generating Teacher Outputs")
     generate_teacher_outputs(cfg, logger)
     
     # 3) Train the student model
-    logger.log("[Stage 3] Student Training (Knowledge Distillation)")
+    logger.log("[Stage 3]  Student Training (Knowledge Distillation)")
     trainer = Trainer(cfg, logger)
     trainer.train()
     
     # 4) Save the final student model
     trainer.save_model(os.path.join(logger.exp_path, "model.pth"))
-    logger.log("[Done] Training complete. Model saved.")
+    logger.log("[Done]  Training complete. Model saved.")
 
 if __name__ == "__main__":
     main()

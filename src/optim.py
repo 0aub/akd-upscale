@@ -10,7 +10,7 @@ class Optimizer:
         self.model_parameters = model_parameters
         self.config = config
         self.num_train_steps = num_train_steps
-        self.total_steps = self.num_train_steps * self.config["epochs"]
+        self.total_steps = self.num_train_steps * self.config.epochs
         self.warmup_steps = self._get_warmup_steps()
         
         # Initialize the underlying optimizer
@@ -20,24 +20,23 @@ class Optimizer:
         self.scheduler = self._init_scheduler()
 
     def _init_optimizer(self):
-        optimizer_name = self.config["optimizer"]
-        lr = self.config["learning_rate"]
-        wd = self.config["weight_decay"]
+        optimizer_name = self.config.optimizer
+        lr = self.config.learning_rate
+        wd = self.config.weight_decay
         
         # Maps to classes in torch.optim
         if optimizer_name in ["Adam", "SGD", "RMSprop", "AdamW"]:
             optimizer_class = getattr(optim, optimizer_name)
             return optimizer_class(self.model_parameters, lr=lr, weight_decay=wd)
         else:
-            raise ValueError("Unsupported optimizer. "
-                             "Available options: 'Adam', 'SGD', 'RMSprop', 'AdamW'.")
+            raise ValueError("Unsupported optimizer. Available options: 'Adam', 'SGD', 'RMSprop', 'AdamW'.")
 
     def _get_warmup_steps(self):
         # If warmup_steps is manually > 0, use it.
         # Otherwise compute from warmup_ratio * num_train_steps
-        if self.config["warmup_steps"] > 0:
-            return self.config["warmup_steps"]
-        return math.ceil(self.num_train_steps * self.config["warmup_ratio"])
+        if self.config.warmup_steps > 0:
+            return self.config.warmup_steps
+        return math.ceil(self.num_train_steps * self.config.warmup_ratio)
 
     def _warmup_constant_lr(self, current_step):
         if current_step < self.warmup_steps:
@@ -45,7 +44,7 @@ class Optimizer:
         return 1.0
 
     def _init_scheduler(self):
-        sched = self.config["scheduler"]
+        sched = self.config.scheduler
         if sched == "step":
             return StepLR(self.optimizer, step_size=1000, gamma=0.1)
         elif sched == "exponential":
@@ -77,4 +76,4 @@ class Optimizer:
         self.optimizer.zero_grad()
     
     def clip_grad_norm(self, parameters):
-        clip_grad_norm_(parameters, self.config["clip_max_norm"])
+        clip_grad_norm_(parameters, self.configclip_max_norm)

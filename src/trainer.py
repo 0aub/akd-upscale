@@ -17,7 +17,7 @@ class Trainer:
         self.logger = logger
         
         # Student model
-        self.model = TinyUpscaler(up_factor=cfg["up_factor"]).to(cfg["device"])
+        self.model = TinyUpscaler(up_factor=cfg.up_factor).to(cfg.device)
         
         # Loss function
         self.criterion = nn.L1Loss()
@@ -27,26 +27,26 @@ class Trainer:
         
         # Datasets
         self.train_dataset = UpscaleDataset(
-            lr_folder=cfg["train_lr_folder"],
-            teacher_folder=cfg["train_teacher_folder"],
+            lr_folder=cfg.train_lr_folder,
+            teacher_folder=cfg.train_teacher_folder,
             transform=self.transform
         )
         self.valid_dataset = UpscaleDataset(
-            lr_folder=cfg["valid_lr_folder"],
-            teacher_folder=cfg["valid_teacher_folder"],
+            lr_folder=cfg.valid_lr_folder,
+            teacher_folder=cfg.valid_teacher_folder,
             transform=self.transform
         )
         
         # Dataloaders
         self.train_loader = DataLoader(
             self.train_dataset,
-            batch_size=cfg["batch_size"],
+            batch_size=cfg.batch_size,
             shuffle=True,
             num_workers=2
         )
         self.valid_loader = DataLoader(
             self.valid_dataset,
-            batch_size=cfg["batch_size"],
+            batch_size=cfg.batch_size,
             shuffle=False,
             num_workers=2
         )
@@ -62,7 +62,7 @@ class Trainer:
     
     def train(self):
         self.logger.log("[Trainer] Starting knowledge distillation training...")
-        for epoch in range(self.cfg["epochs"]):
+        for epoch in range(self.cfg.epochs):
             train_loss = self._run_one_epoch(self.train_loader, training=True)
             valid_loss = self._run_one_epoch(self.valid_loader, training=False)
             
@@ -79,8 +79,8 @@ class Trainer:
         
         total_loss = 0.0
         for step, (lr_batch, teacher_batch) in enumerate(loader):
-            lr_batch = lr_batch.to(self.cfg["device"])
-            teacher_batch = teacher_batch.to(self.cfg["device"])
+            lr_batch = lr_batch.to(self.cfg.device)
+            teacher_batch = teacher_batch.to(self.cfg.device)
             
             if training:
                 self.optimizer.zero_grad()

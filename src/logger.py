@@ -22,7 +22,7 @@ class Logger:
                     print(f"# {current_time} # {line}", flush=True, file=f)
 
     def log_config(self, config):
-        self.log("[INFO] Configuration:")
+        self.log("[INFO]  Configuration:")
         max_key_length = max(len(key) for key in config.keys())
         for key, value in config.items():
             self.log(f"\t -> {key.ljust(max_key_length)}: {value}")
