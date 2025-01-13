@@ -22,7 +22,7 @@ class DownscaleByFactor:
 def prepare_low_res_images(cfg, logger):
     """
     Downscale HR images by cfg.up_factor to produce LR images.
-    Skips files that already exist unless cfg.overwrite_data=True.
+    Skips files that already exist unless cfg.overwrite_teacher_data=True.
     """
     train_hr_folder = cfg.train_hr_folder
     valid_hr_folder = cfg.valid_hr_folder
@@ -47,7 +47,7 @@ def prepare_low_res_images(cfg, logger):
         lr_output_path = os.path.join(train_lr_folder, filename)
         
         # Skip if file already exists and no overwrite
-        if os.path.exists(lr_output_path) and not cfg.overwrite_data:
+        if os.path.exists(lr_output_path) and not cfg.overwrite_teacher_data:
             continue
         
         img = Image.open(path).convert("RGB")
@@ -66,7 +66,7 @@ def prepare_low_res_images(cfg, logger):
         lr_output_path = os.path.join(valid_lr_folder, filename)
         
         # Skip if file already exists and no overwrite
-        if os.path.exists(lr_output_path) and not cfg.overwrite_data:
+        if os.path.exists(lr_output_path) and not cfg.overwrite_teacher_data:
             continue
         
         img = Image.open(path).convert("RGB")
@@ -80,7 +80,7 @@ def prepare_low_res_images(cfg, logger):
 def generate_teacher_outputs(cfg, logger):
     """
     Use Stable Diffusion x4 Upscaler to generate teacher outputs from LR.
-    Skips files that already exist unless cfg.overwrite_data == True.
+    Skips files that already exist unless cfg.overwrite_teacher_data == True.
     If no files need generating, it won't even load the pipeline.
     """
     train_lr_paths = glob.glob(os.path.join(cfg.train_lr_folder, "*"))
@@ -97,20 +97,20 @@ def generate_teacher_outputs(cfg, logger):
     for path in train_lr_paths:
         filename = os.path.basename(path)
         output_path = os.path.join(train_teacher_folder, filename)
-        if cfg.overwrite_data or not os.path.exists(output_path):
+        if cfg.overwrite_teacher_data or not os.path.exists(output_path):
             needed_train_paths.append(path)
     
     needed_valid_paths = []
     for path in valid_lr_paths:
         filename = os.path.basename(path)
         output_path = os.path.join(valid_teacher_folder, filename)
-        if cfg.overwrite_data or not os.path.exists(output_path):
+        if cfg.overwrite_teacher_data or not os.path.exists(output_path):
             needed_valid_paths.append(path)
     
     # If nothing needs to be generated, we can skip pipeline loading entirely
     total_needed = len(needed_train_paths) + len(needed_valid_paths)
     if total_needed == 0:
-        logger.log("[Teacher]  All teacher outputs already exist, and overwrite_data=False. Skipping upscaling.")
+        logger.log("[Teacher]  All teacher outputs already exist, and overwrite_teacher_data=False. Skipping upscaling.")
         return
     
     # Otherwise, load pipeline

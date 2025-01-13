@@ -52,7 +52,7 @@ def parse_arguments():
     parser.add_argument("--clip_max_norm", type=float, default=1.0)
     
     # Seed
-    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--seed", type=int, default=1998)
     
     args = parser.parse_args()
     return args
