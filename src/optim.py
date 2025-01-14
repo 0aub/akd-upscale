@@ -76,4 +76,4 @@ class Optimizer:
         self.optimizer.zero_grad()
     
     def clip_grad_norm(self, parameters):
-        clip_grad_norm_(parameters, self.configclip_max_norm)
+        return clip_grad_norm_(parameters, self.config.clip_max_norm)

@@ -19,7 +19,7 @@ def parse_arguments():
     parser.add_argument("--valid_lr_folder", type=str, default="data/DIV2K_valid_LR")
     parser.add_argument("--train_teacher_folder", type=str, default="data/DIV2K_train_teacher")
     parser.add_argument("--valid_teacher_folder", type=str, default="data/DIV2K_valid_teacher")
-    parser.add_argument("--overwrite_teacher_data", action='store_true', default="overwrite generated data by the teacher")
+    parser.add_argument("--overwrite_teacher_data", action='store_true', default=False)
     
     # Teacher Model Info
     parser.add_argument("--model_id", type=str, default="stabilityai/stable-diffusion-x4-upscaler")
@@ -28,7 +28,7 @@ def parse_arguments():
     parser.add_argument("--guidance_scale", type=float, default=0.0)
     
     # Training Hyperparameters
-    parser.add_argument("--batch_size", type=int, default=4)
+    parser.add_argument("--batch_size", type=int, default=1)
     parser.add_argument("--epochs", type=int, default=5)
     parser.add_argument("--learning_rate", type=float, default=1e-4)
     parser.add_argument("--weight_decay", type=float, default=0.0)
@@ -74,17 +74,21 @@ def main():
         save=True  # saving logs to file
     )
     # Log configuration
+    logger.logline()
     logger.log_config(vars(cfg))
     
     # 1) Prepare LR images from HR
+    logger.logline()
     logger.log("[Stage 1]  Preparing Low-Resolution Images")
     prepare_low_res_images(cfg, logger)
     
     # 2) Generate teacher outputs
+    logger.logline()
     logger.log("[Stage 2]  Generating Teacher Outputs")
     generate_teacher_outputs(cfg, logger)
     
     # 3) Train the student model
+    logger.logline()
     logger.log("[Stage 3]  Student Training (Knowledge Distillation)")
     trainer = Trainer(cfg, logger)
     trainer.train()
