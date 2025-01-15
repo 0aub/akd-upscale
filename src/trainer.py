@@ -1,14 +1,18 @@
 import torch
-import torch.nn as nn
 from torch.utils.data import DataLoader
 from torchvision import transforms
 
 import time
+import glob
+import os
+from PIL import Image
+
 
 from .dataset import UpscaleDataset
 from .model import TinyUpscaler
 from .optim import Optimizer
 from .teacher import DownscaleByFactor
+from .loss import Loss
 
 def collate_fn(batch):
     """
@@ -33,7 +37,7 @@ class Trainer:
         self.model = TinyUpscaler(up_factor=cfg.up_factor).to(cfg.device)
         
         # Loss function
-        self.criterion = nn.L1Loss()
+        self.criterion = Loss(cfg).to(cfg.device)
         
         # Data transforms
         self.transform = transforms.Compose([
@@ -80,6 +84,7 @@ class Trainer:
     
     def train(self):
         self.logger.log("[Trainer]  Starting knowledge distillation training...\n")
+        training_start_time = time.time()
         for epoch in range(self.cfg.epochs):
             # Start timer for this epoch
             epoch_start_time = time.time()
@@ -101,7 +106,9 @@ class Trainer:
                 f"Grad Norm: {grad_norm:.6f}  |  LR: {self.optimizer.get_lr():.6f}  |  "
                 f"Time: {epoch_time:.2f}s"
             )
-            
+
+        total_time_str = time.strftime("%H:%M:%S", time.gmtime(time.time() - training_start_time))
+        self.logger.log(f"\n[Trainer]  Training completed in {total_time_str}.")
     
     def _run_one_epoch(self, loader, training=True):
         if training:
@@ -110,7 +117,7 @@ class Trainer:
             self.model.eval()
         
         total_loss = 0.0
-        for step, (lr_img, teacher_img) in enumerate(loader):
+        for (lr_img, teacher_img) in loader:
             # Both are single images, shape: [3, 256, 256]
             lr_img = lr_img.to(self.cfg.device)
             teacher_img = teacher_img.to(self.cfg.device)
@@ -134,6 +141,73 @@ class Trainer:
             total_loss += loss.item()
         
         return total_loss / len(loader)
+    
+    def test(self):
+        """
+        1) Loads all images from cfg.test_path (low-resolution images).
+        2) Applies self.transform (DownscaleByFactor + ToTensor, or your custom pipeline).
+        3) Feeds them into self.model to get upscaled outputs.
+        4) Saves the results to logger.exp_path/results/.
+        """
+        test_folder = self.cfg.test_path
+        result_folder = os.path.join(self.logger.exp_path, "results")
+        os.makedirs(result_folder, exist_ok=True)
+        
+        # Switch model to eval mode
+        self.model.eval()
+        
+        test_files = glob.glob(os.path.join(test_folder, "*"))
+        self.logger.log(f"[Trainer]  Found {len(test_files)} test images in: {test_folder}\n")
+        
+        # Limit the number of test images based on cfg.test_count
+        max_test_count = min(self.cfg.test_count, len(test_files))
+        test_files = test_files[:max_test_count]
+        
+        # Record the start time of the testing process
+        test_start_time = time.time()
+
+        with torch.no_grad():
+            for i, fpath in enumerate(test_files, start=1):
+                # Start timing for this image
+                img_start_time = time.time()
+
+                # Load image and apply the same transform pipeline
+                img = Image.open(fpath).convert("RGB")
+                inp_tensor = self.transform(img)   # shape [3, H, W]
+                
+                # Add batch dimension, move to GPU if available
+                inp_tensor = inp_tensor.unsqueeze(0).to(self.cfg.device)  # [1, 3, H, W]
+                
+                # Run the model
+                out = self.model(inp_tensor)  # [1, 3, newH, newW]
+                
+                # Move back to CPU and remove batch dimension
+                out = out.squeeze(0).cpu()
+                
+                # Clamp to [0,1], convert to PIL
+                out = torch.clamp(out, 0, 1)
+                out_img = transforms.ToPILImage()(out)
+                
+                # Save the upscaled image in results folder with the same filename
+                basename = os.path.basename(fpath)
+                save_path = os.path.join(result_folder, basename)
+                out_img.save(save_path)
+
+                # Compute elapsed time for this image
+                img_time = time.time() - img_start_time
+
+                self.logger.log(f"[Trainer]  Upscaling {(i+1)}/{max_test_count}  (Time: {img_time:.2f}s)")
+                
+                # Break loop if max_test_count is reached
+                if (i+1) >= max_test_count:
+                    break
+
+        # Compute the total test time
+        total_time_str = time.strftime("%H:%M:%S", time.gmtime(time.time() - test_start_time))
+
+        self.logger.log(f"\n[Trainer]  Test images saved to: {result_folder}")
+        self.logger.log(f"[Trainer]  Testing completed in {total_time_str}")
+
     
     def save_model(self, path):
         torch.save(self.model.state_dict(), path)

@@ -163,6 +163,7 @@ cython_debug/
 
 
 */log*/
+log
 output/
 */__pycache__/
 

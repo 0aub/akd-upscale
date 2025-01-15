@@ -28,4 +28,4 @@ class Logger:
             self.log(f"\t -> {key.ljust(max_key_length)}: {value}")
 
     def logline(self):
-        self.log('\n' + '='*100 + '\n')
+        self.log('\n' + '='*50 + '\n')
