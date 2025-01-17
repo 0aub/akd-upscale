@@ -3,7 +3,8 @@ python main.py \
   --overwrite_teacher_data \
   --exp_name "1_small_l1_vgg_no_scheduler" \
   --generator_loss '{"vgg": 1.0, "l1": 0.1}' \
-  --discriminator_loss '{"vgg": 1.0, "l1": 0.1}'
+  --discriminator_loss '{"vgg": 1.0, "l1": 0.1}' \
+  --epochs 100
 
 
 # 2) Medium Student, VGG + LPIPS Loss, AdamW, Step Scheduler
@@ -17,7 +18,8 @@ python main.py \
   --generator_weight_decay 1e-5 \
   --generator_scheduler "step" \
   --discriminator_optimizer "AdamW" \
-  --discriminator_weight_decay 1e-5
+  --discriminator_weight_decay 1e-5 \
+  --epochs 100
 
 # 3) Tiny Model, Pure LPIPS + L1, RMSprop, Constant With Warmup
 python main.py \
@@ -31,7 +33,8 @@ python main.py \
   --generator_scheduler "constant_with_warmup" \
   --discriminator_scheduler "constant_with_warmup" \
   --generator_warmup_steps 100 \
-  --discriminator_warmup_steps 100
+  --discriminator_warmup_steps 100 \
+  --epochs 100
 
 # 4) Bigger Generator, Strict MSE + VGG, CosineAnnealing
 python main.py \
@@ -43,7 +46,8 @@ python main.py \
   --generator_learning_rate 2e-4 \
   --discriminator_learning_rate 2e-4 \
   --generator_scheduler "cosine" \
-  --discriminator_scheduler "cosine"
+  --discriminator_scheduler "cosine" \
+  --epochs 100
 
 # 5) Mid-Range Model, Full Tri-Loss (L1+VGG+LPIPS), Adam, Exponential Decay
 python main.py \
@@ -53,4 +57,5 @@ python main.py \
   --generator_loss '{"l1": 0.5, "vgg": 0.4, "lpips": 0.1}' \
   --discriminator_loss '{"l1": 1.0}' \
   --generator_scheduler "exponential" \
-  --discriminator_scheduler "exponential"
+  --discriminator_scheduler "exponential" \
+  --epochs 100
