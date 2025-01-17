@@ -1,3 +1,6 @@
+# test
+python main.py --epochs 1
+
 # 1) Small Student, Mixed Loss, Basic Adam, No Scheduler
 python main.py \
   --overwrite_teacher_data \

@@ -109,16 +109,16 @@ class Trainer:
         )
 
     def train(self):
-        self.logger.log("[Trainer] Starting Training...\n")
+        self.logger.log("[Trainer]  Starting Training...\n")
         start_time = time.time()
 
         for epoch in range(1, self.cfg.epochs + 1):
             epoch_start_time = time.time()
 
             # Run one epoch of training
-            train_g_loss, train_d_loss = self._run_one_epoch(self.train_loader, training=True)
+            train_g_loss, train_d_loss = self._run_one_epoch(self.train_loader, training=True, epoch=epoch)
             # Run one epoch of validation (no parameter updates)
-            val_g_loss, val_d_loss = self._run_one_epoch(self.valid_loader, training=False)
+            val_g_loss, val_d_loss = self._run_one_epoch(self.valid_loader, training=False, epoch=epoch)
 
             # Clip gradient norms (if desired) after the epoch
             g_grad_norm = self.g_optimizer.clip_grad_norm(self.generator.parameters())
@@ -131,22 +131,24 @@ class Trainer:
             # Compute epoch time
             epoch_time = time.time() - epoch_start_time
 
-            # Log results
+            # Log results for the epoch
             self.logger.log(
-                f"[Epoch {epoch}/{self.cfg.epochs}] "
-                f"Train Loss | G: {train_g_loss:.4f}, D: {train_d_loss:.4f} || "
-                f"Val Loss | G: {val_g_loss:.4f}, D: {val_d_loss:.4f} || "
-                f"Grad Norm | G: {g_grad_norm:.6f}, D: {d_grad_norm:.6f} || "
-                f"LR | G: {g_lr:.6f}, D: {d_lr:.6f} || "
-                f"Time: {epoch_time:.2f}s"
+                f"\n{'='*50}\n"
+                f"[Epoch {epoch}/{self.cfg.epochs}] Summary:\n"
+                f"\tTrain Loss | G: {train_g_loss:.4f}  , D: {train_d_loss:.4f}\n"
+                f"\tVal Loss   | G: {val_g_loss:.4f}  , D: {val_d_loss:.4f}\n"
+                f"\tGrad Norm  | G: {g_grad_norm:.6f}, D: {d_grad_norm:.6f}\n"
+                f"\tLR         | G: {g_lr:.6f}, D: {d_lr:.6f}\n"
+                f"\tTime       | {epoch_time:.2f}s\n"
+                f"{'='*50}\n"
             )
 
-
         total_time = time.strftime("%H:%M:%S", time.gmtime(time.time() - start_time))
-        self.logger.log(f"\n[Trainer] Training completed in {total_time}.\n")
+        self.logger.log(f"\n[Trainer]  Training completed in {total_time}.\n")
 
 
-    def _run_one_epoch(self, loader, training=True):
+
+    def _run_one_epoch(self, loader, training=True, epoch=1):
         if training:
             self.generator.train()
             self.discriminator.train()
@@ -157,7 +159,9 @@ class Trainer:
         total_g_loss = 0.0
         total_d_loss = 0.0
 
-        for lr_img, teacher_img in loader:
+        for step, (lr_img, teacher_img) in enumerate(loader, start=1):
+            step_start_time = time.time()
+
             # Move data to device
             lr_img = lr_img.to(self.cfg.device).unsqueeze(0)       # [B=1,3,H,W]
             teacher_img = teacher_img.to(self.cfg.device).unsqueeze(0)
@@ -166,7 +170,6 @@ class Trainer:
             # 1) Update Discriminator
             # ---------------------------------------------------------
             if training:
-                # Zero out gradients for D
                 self.d_optimizer.zero_grad()
                 
                 # Generate fake image without gradient for G
@@ -222,12 +225,35 @@ class Trainer:
             total_g_loss += g_loss.item()
             total_d_loss += d_loss.item()
 
+            # Step-wise logging
+            step_time = time.time() - step_start_time
+            if training:
+                g_lr = self.g_optimizer.get_lr()
+                d_lr = self.d_optimizer.get_lr()
+                g_grad_norm = self.g_optimizer.clip_grad_norm(self.generator.parameters())
+                d_grad_norm = self.d_optimizer.clip_grad_norm(self.discriminator.parameters())
+
+                self.logger.log(
+                    f"[Epoch {epoch} | Train Step {step}/{len(loader)}] "
+                    f"Loss | G: {g_loss.item():.4f}, D: {d_loss.item():.4f} || "
+                    f"Grad Norm | G: {g_grad_norm:.6f}, D: {d_grad_norm:.6f} || "
+                    f"LR | G: {g_lr:.6f}, D: {d_lr:.6f} || "
+                    f"Time: {step_time:.2f}s"
+                )
+            else:
+                self.logger.log(
+                    f"[Epoch {epoch} | Valid Step {step}/{len(loader)}] "
+                    f"Loss | G: {g_loss.item():.4f}, D: {d_loss.item():.4f} || "
+                    f"Time: {step_time:.2f}s"
+                )
+
+
         # Average G and D losses across the dataset
         avg_g_loss = total_g_loss / len(loader)
         avg_d_loss = total_d_loss / len(loader)
 
         return avg_g_loss, avg_d_loss
-    
+
     def test(self):
         result_folder = os.path.join(self.logger.exp_path, "results")
         os.makedirs(result_folder, exist_ok=True)
