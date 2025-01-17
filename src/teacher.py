@@ -1,183 +1,161 @@
 import os
 import glob
-
+import math
+import shutil 
 from PIL import Image
 import torch
-from torchvision import transforms
-
 from diffusers import StableDiffusionUpscalePipeline
 
-TEACHER_PIPELINE = None
 
-def load_teacher_pipeline(cfg):
-    global TEACHER_PIPELINE
-    if TEACHER_PIPELINE is None:
-        TEACHER_PIPELINE = StableDiffusionUpscalePipeline.from_pretrained(
-            cfg.model_id,
-            torch_dtype=torch.float32,
-            safety_checker=None
-        ).to(cfg.device)
-        TEACHER_PIPELINE.set_progress_bar_config(disable=True)
-    return TEACHER_PIPELINE
-
-class DownscaleByFactor:
-    def __init__(self, factor: int):
-        self.factor = factor
-
-    def __call__(self, img: Image.Image) -> Image.Image:
-        w, h = img.size
-        new_w = w // self.factor
-        new_h = h // self.factor
-        return img.resize((new_w, new_h), Image.BICUBIC)
-
-def prepare_low_res_images(cfg, logger):
+class TeacherUpscaler:
     """
-    Downscale HR images by cfg.up_factor to produce LR images.
-    Skips files that already exist unless cfg.overwrite_teacher_data=True.
+    1) Takes a single LR folder (cfg.lr_folder).
+    2) Splits:
+       - first 100 => test
+       - remainder => 80/20 => train/val.
+    3) Upscales each split with the teacher pipeline:
+       - saves in teacher_folder/<split>
+       - also moves or copies LR images to lr_folder/<split>
+         so the Trainer can pick them up easily.
     """
-    train_hr_folder = cfg.train_hr_folder
-    valid_hr_folder = cfg.valid_hr_folder
-    
-    train_lr_folder = cfg.train_lr_folder
-    valid_lr_folder = cfg.valid_lr_folder
-    
-    os.makedirs(train_lr_folder, exist_ok=True)
-    os.makedirs(valid_lr_folder, exist_ok=True)
-    
-    # Define a custom transform pipeline (example from your snippet)
-    downscale_transform = transforms.Compose([
-        DownscaleByFactor(cfg.up_factor)
-    ])
-    
-    # Training HR -> LR
-    train_hr_paths = glob.glob(os.path.join(train_hr_folder, "*"))
-    logger.log(f"[Teacher]  Generating LR from training HR: {train_hr_folder}, found {len(train_hr_paths)} images.")
-    
-    for i, path in enumerate(train_hr_paths):
-        filename = os.path.basename(path)
-        lr_output_path = os.path.join(train_lr_folder, filename)
-        
-        # Skip if file already exists and no overwrite
-        if os.path.exists(lr_output_path) and not cfg.overwrite_teacher_data:
-            continue
-        
-        img = Image.open(path).convert("RGB")
-        lr_img = downscale_transform(img)
-        lr_img.save(lr_output_path)
-        
-        if (i+1) % 50 == 0:
-            logger.log(f"[Teacher]  Generating LR {i+1}/{len(train_hr_paths)}")
-    
-    # Validation HR -> LR
-    valid_hr_paths = glob.glob(os.path.join(valid_hr_folder, "*"))
-    logger.log(f"[Teacher]  Generating LR from validation HR: {valid_hr_folder}, found {len(valid_hr_paths)} images.")
-    
-    for i, path in enumerate(valid_hr_paths):
-        filename = os.path.basename(path)
-        lr_output_path = os.path.join(valid_lr_folder, filename)
-        
-        # Skip if file already exists and no overwrite
-        if os.path.exists(lr_output_path) and not cfg.overwrite_teacher_data:
-            continue
-        
-        img = Image.open(path).convert("RGB")
-        lr_img = downscale_transform(img)
-        lr_img.save(lr_output_path)
-        
-        if (i+1) % 50 == 0:
-            logger.log(f"[Teacher]  Generating LR {i+1}/{len(valid_hr_paths)}")
 
+    def __init__(self, cfg, logger):
+        self.cfg = cfg
+        self.logger = logger
+        self.teacher_pipeline = None
 
-def generate_teacher_outputs(cfg, logger):
-    """
-    Use Stable Diffusion x4 Upscaler to generate teacher outputs from LR.
-    Skips files that already exist unless cfg.overwrite_teacher_data == True.
-    If no files need generating, it won't even load the pipeline.
-    """
-    train_lr_paths = glob.glob(os.path.join(cfg.train_lr_folder, "*"))
-    valid_lr_paths = glob.glob(os.path.join(cfg.valid_lr_folder, "*"))
-    
-    train_teacher_folder = cfg.train_teacher_folder
-    valid_teacher_folder = cfg.valid_teacher_folder
-    
-    os.makedirs(train_teacher_folder, exist_ok=True)
-    os.makedirs(valid_teacher_folder, exist_ok=True)
-    
-    # Determine which files actually need teacher outputs
-    needed_train_paths = []
-    for path in train_lr_paths:
-        filename = os.path.basename(path)
-        output_path = os.path.join(train_teacher_folder, filename)
-        if cfg.overwrite_teacher_data or not os.path.exists(output_path):
-            needed_train_paths.append(path)
-    
-    needed_valid_paths = []
-    for path in valid_lr_paths:
-        filename = os.path.basename(path)
-        output_path = os.path.join(valid_teacher_folder, filename)
-        if cfg.overwrite_teacher_data or not os.path.exists(output_path):
-            needed_valid_paths.append(path)
-    
-    # If nothing needs to be generated, we can skip pipeline loading entirely
-    total_needed = len(needed_train_paths) + len(needed_valid_paths)
-    if total_needed == 0:
-        logger.log("[Teacher]  All teacher outputs already exist, and overwrite_teacher_data=False. Skipping upscaling.")
-        return
-    
-    # Otherwise, load pipeline
-    logger.log("[Teacher]  Loading the teacher pipeline...")
-    teacher_pipeline = load_teacher_pipeline(cfg)
-    
-    # --- Training teacher outputs ---
-    if needed_train_paths:
-        logger.log(f"[Teacher]  Generating teacher outputs for train LR: {len(needed_train_paths)} images.")
-        for i, path in enumerate(needed_train_paths):
-            filename = os.path.basename(path)
-            output_path = os.path.join(train_teacher_folder, filename)
-            
+        # Make subfolders for LR
+        self.lr_train_dir = os.path.join(self.cfg.lr_folder, "train")
+        self.lr_val_dir   = os.path.join(self.cfg.lr_folder, "val")
+        self.lr_test_dir  = os.path.join(self.cfg.lr_folder, "test")
+
+        # Make subfolders for teacher
+        self.teacher_train_dir = os.path.join(self.cfg.teacher_folder, "train")
+        self.teacher_val_dir   = os.path.join(self.cfg.teacher_folder, "val")
+        self.teacher_test_dir  = os.path.join(self.cfg.teacher_folder, "test")
+
+        # Create directories
+        for d in [self.lr_train_dir, self.lr_val_dir, self.lr_test_dir,
+                  self.teacher_train_dir, self.teacher_val_dir, self.teacher_test_dir]:
+            os.makedirs(d, exist_ok=True)
+
+    def load_teacher_pipeline(self):
+        if self.teacher_pipeline is None:
+            self.logger.log("[Teacher]  Loading StableDiffusionUpscalePipeline...")
+            self.teacher_pipeline = StableDiffusionUpscalePipeline.from_pretrained(
+                self.cfg.model_id,
+                torch_dtype=torch.float32,
+                safety_checker=None
+            ).to(self.cfg.device)
+            self.teacher_pipeline.set_progress_bar_config(disable=True)
+        return self.teacher_pipeline
+
+    def split_data(self):
+        """
+        Splits the images in self.cfg.lr_folder (the "root" LR) as follows:
+          - first 100 => test
+          - remainder => 80/20 => train/val
+        Returns 3 lists: (test_list, train_list, val_list)
+        """
+        all_files = sorted(
+            f for f in glob.glob(os.path.join(self.cfg.lr_folder, "*"))
+            if os.path.isfile(f)  # exclude subdirs
+        )
+
+        # Exclude subdirs like lr_folder/train if they already exist from a previous run
+        # We'll only split the top-level images.  If you want to handle that differently,
+        # adapt as needed.
+        # For safety, let's keep only those that are in the root folder (no slash).
+        root_files = [f for f in all_files if os.path.dirname(f) == self.cfg.lr_folder]
+
+        if len(root_files) == 0:
+            self.logger.log("[Teacher]  No top-level LR images found. Possibly already split?")
+            return [], [], []
+
+        num_test = min(100, len(root_files))
+        test_list = root_files[:num_test]
+        remainder = root_files[num_test:]
+        split_idx = math.floor(0.8 * len(remainder))
+        train_list = remainder[:split_idx]
+        val_list   = remainder[split_idx:]
+
+        self.logger.log(
+            f"\n[Teacher]  Dataset Summary\n"
+            f"{'-'*40}\n"
+            f"Total LR Images Found: {len(root_files):>5}\n"
+            f"  - Training Images:    {len(train_list):>5}\n"
+            f"  - Validation Images:  {len(val_list):>5}\n"
+            f"  - Test Images:        {len(test_list):>5}\n"
+            f"{'-'*40}"
+        )
+        return test_list, train_list, val_list
+
+    def move_or_copy(self, src_path, dst_folder):
+        """
+        Moves (or copies) a file from src_path -> dst_folder.
+        Here we do a 'move'. If you'd rather copy, use shutil.copy2.
+        """
+        filename = os.path.basename(src_path)
+        dst_path = os.path.join(dst_folder, filename)
+
+        # If we do not want to overwrite & file exists, skip
+        if os.path.exists(dst_path) and not self.cfg.overwrite_teacher_data:
+            return
+        # move
+        shutil.move(src_path, dst_path)
+
+    def run(self):
+        test_list, train_list, val_list = self.split_data()
+
+        # Move LR images into subfolders
+        for f in test_list:
+            self.move_or_copy(f, self.lr_test_dir)
+        for f in train_list:
+            self.move_or_copy(f, self.lr_train_dir)
+        for f in val_list:
+            self.move_or_copy(f, self.lr_val_dir)
+
+        # Now we have:
+        #  low_resolution_folder/train/*.png
+        #  low_resolution_folder/val/*.png
+        #  low_resolution_folder/test/*.png
+
+        # Upscale each split with teacher
+        self.upscale_split(self.lr_train_dir, self.teacher_train_dir, "train")
+        self.upscale_split(self.lr_val_dir,   self.teacher_val_dir,   "val")
+        self.upscale_split(self.lr_test_dir,  self.teacher_test_dir,  "test")
+
+        self.logger.log("[Teacher]  Done splitting and upscaling.")
+
+    def upscale_split(self, lr_dir, teacher_dir, split_name):
+        """
+        Upscale all images in lr_dir, save them to teacher_dir.
+        """
+        lr_files = sorted(glob.glob(os.path.join(lr_dir, "*")))
+        if not lr_files:
+            self.logger.log(f"[Teacher]  No LR images found in {lr_dir}, skip {split_name} upscaling.")
+            return
+        
+        pipe = self.load_teacher_pipeline()
+        self.logger.log(f"[Teacher]  Upscaling {len(lr_files)} {split_name} images => {teacher_dir}")
+
+        for i, path in enumerate(lr_files, start=1):
+            basename = os.path.basename(path)
+            out_path = os.path.join(teacher_dir, basename)
+
+            if os.path.exists(out_path) and not self.cfg.overwrite_teacher_data:
+                continue
+
             lr_img = Image.open(path).convert("RGB")
             with torch.no_grad():
-                upscaled = teacher_pipeline(
-                    prompt=cfg.teacher_prompt,
+                out_img = pipe(
+                    prompt=self.cfg.teacher_prompt,
                     image=lr_img,
-                    num_inference_steps=cfg.num_inference_steps,
-                    guidance_scale=cfg.guidance_scale
+                    num_inference_steps=self.cfg.num_inference_steps,
+                    guidance_scale=self.cfg.guidance_scale
                 ).images[0]
-            upscaled.save(output_path)
-            
-            if (i+1) % 50 == 0:
-                logger.log(f"[Teacher]  Upscaling {i+1}/{len(needed_train_paths)} training images...")
-    
-    # --- Validation teacher outputs ---
-    if needed_valid_paths:
-        logger.log(f"[Teacher]  Generating teacher outputs for valid LR: {len(needed_valid_paths)} images.")
-        for i, path in enumerate(needed_valid_paths):
-            filename = os.path.basename(path)
-            output_path = os.path.join(valid_teacher_folder, filename)
-            
-            lr_img = Image.open(path).convert("RGB")
-            with torch.no_grad():
-                upscaled = teacher_pipeline(
-                    prompt=cfg.teacher_prompt,
-                    image=lr_img,
-                    num_inference_steps=cfg.num_inference_steps,
-                    guidance_scale=cfg.guidance_scale
-                ).images[0]
-            upscaled.save(output_path)
-            
-            if (i+1) % 10 == 0:
-                logger.log(f"[Teacher]  Upscaling {i+1}/{len(needed_valid_paths)} validation images...")
+            out_img.save(out_path)
 
-def upscale_image(cfg, lr_image):
-    teacher_pipeline = load_teacher_pipeline(cfg)
+            if i % 50 == 0:
+                self.logger.log(f"[Teacher]  {split_name} => {i}/{len(lr_files)} upscaled.")
 
-    with torch.no_grad():
-        # The pipeline's call returns a PipelineOutput object. We take `.images[0]`.
-        upscaled_img = teacher_pipeline(
-            prompt=cfg.teacher_prompt,
-            image=lr_image,
-            num_inference_steps=cfg.num_inference_steps,
-            guidance_scale=cfg.guidance_scale
-        ).images[0]
-    
-    return upscaled_img

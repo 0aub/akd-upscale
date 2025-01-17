@@ -6,13 +6,16 @@ import time
 import glob
 import os
 from PIL import Image
-
+import matplotlib.pyplot as plt
 
 from .dataset import UpscaleDataset
 from .model import LightweightSRModel, StrongPatchDiscriminator
 from .optim import Optimizer
-from .teacher import DownscaleByFactor, upscale_image
 from .loss import Loss
+
+
+def get_total_trainable_parameters(model):
+    return sum(param.numel() for param in model.parameters() if param.requires_grad)
 
 def collate_fn(batch):
     lr_img, teacher_img = batch[0]
@@ -24,17 +27,20 @@ class Trainer:
         self.cfg = cfg
         self.logger = logger
         
-        # Student models
+        # Student generator & Discriminator
         self.generator = LightweightSRModel(
-            up_factor=cfg.up_factor,
-            base_ch=32,
-            num_blocks=4
+            up_factor=cfg.generator_up_factor,
+            base_ch=cfg.generator_base_channels,
+            num_blocks=cfg.generator_num_blocks
         ).to(cfg.device)
-        
+
         self.discriminator = StrongPatchDiscriminator(
-            in_ch=3, 
-            base_ch=64
+            in_ch=cfg.discriminator_in_channels, 
+            base_ch=cfg.discriminator_base_channels
         ).to(cfg.device)
+
+        logger.log(f"G Total Parameters -> {get_total_trainable_parameters(self.generator)}")
+        logger.log(f"D Total Parameters -> {get_total_trainable_parameters(self.discriminator)}")
         
         # Loss function
         self.g_criterion = Loss(cfg.generator_loss, cfg.device).to(cfg.device)
@@ -76,24 +82,17 @@ class Trainer:
     
     def prepare_dataloaders(self):
         # Data transforms
-        self.transform = transforms.Compose([
-            DownscaleByFactor(self.cfg.up_factor),
-            transforms.ToTensor(),
-        ])
+        self.transform = transforms.ToTensor()
 
         # Datasets
-        self.train_dataset = UpscaleDataset(
-            lr_folder=self.cfg.train_lr_folder,
-            teacher_folder=self.cfg.train_teacher_folder,
-            transform=self.transform
-        )
-        self.valid_dataset = UpscaleDataset(
-            lr_folder=self.cfg.valid_lr_folder,
-            teacher_folder=self.cfg.valid_teacher_folder,
-            transform=self.transform
-        )
-        
-        # Dataloaders (batch_size=1)
+        train_lr_dir = os.path.join(self.cfg.low_resolution_folder, "train")
+        train_teacher_dir = os.path.join(self.cfg.teacher_folder, "train")
+        self.train_dataset = UpscaleDataset(train_lr_dir, train_teacher_dir, transform=transform)
+
+        val_lr_dir = os.path.join(self.cfg.low_resolution_folder, "val")
+        val_teacher_dir = os.path.join(self.cfg.teacher_folder, "val")
+        self.valid_dataset = UpscaleDataset(val_lr_dir, val_teacher_dir, transform=transform)
+
         self.train_loader = DataLoader(
             self.train_dataset,
             batch_size=self.cfg.batch_size,
@@ -110,10 +109,6 @@ class Trainer:
         )
 
     def train(self):
-        """
-        Runs the main training loop across all epochs,
-        computing both G and D losses and logging them.
-        """
         self.logger.log("[Trainer] Starting Training...\n")
         start_time = time.time()
 
@@ -152,14 +147,6 @@ class Trainer:
 
 
     def _run_one_epoch(self, loader, training=True):
-        """
-        Runs a single epoch of training or validation.
-        For training=True:
-        1) Updates Discriminator (real->1, fake->0).
-        2) Updates Generator (reconstruction/distillation + adversarial).
-        For training=False:
-        Simply measures losses without optimizer steps.
-        """
         if training:
             self.generator.train()
             self.discriminator.train()
@@ -175,9 +162,9 @@ class Trainer:
             lr_img = lr_img.to(self.cfg.device).unsqueeze(0)       # [B=1,3,H,W]
             teacher_img = teacher_img.to(self.cfg.device).unsqueeze(0)
 
-            ###########################################################
-            # 1) Update Discriminator (only in training)
-            ###########################################################
+            # ---------------------------------------------------------
+            # 1) Update Discriminator
+            # ---------------------------------------------------------
             if training:
                 # Zero out gradients for D
                 self.d_optimizer.zero_grad()
@@ -204,9 +191,9 @@ class Trainer:
                 # Validation mode => no D updates
                 d_loss = torch.tensor(0.0, device=self.cfg.device)
 
-            ###########################################################
+            # ---------------------------------------------------------
             # 2) Update Generator
-            ###########################################################
+            # ---------------------------------------------------------
             if training:
                 self.g_optimizer.zero_grad()
             
@@ -242,83 +229,73 @@ class Trainer:
         return avg_g_loss, avg_d_loss
     
     def test(self):
-        test_folder = self.cfg.test_path
         result_folder = os.path.join(self.logger.exp_path, "results")
         os.makedirs(result_folder, exist_ok=True)
-        
-        # Switch both G and D to eval (though D isn't strictly needed here)
+
+        # Evaluate on the low_resolution_folder/test + teacher_folder/test
+        test_lr_dir = os.path.join(self.cfg.low_resolution_folder, "test")
+        test_teacher_dir = os.path.join(self.cfg.teacher_folder, "test")
+
+        test_files = sorted(glob.glob(os.path.join(test_lr_dir, "*")))
+        self.logger.log(f"[Trainer] Found {len(test_files)} test LR images.")
+
         self.generator.eval()
         self.discriminator.eval()
-        
-        # Gather test files
-        test_files = glob.glob(os.path.join(test_folder, "*"))
-        self.logger.log(f"[Trainer] Found {len(test_files)} test images in: {test_folder}")
-        
-        max_test_count = min(self.cfg.test_count, len(test_files))
-        test_files = test_files[:max_test_count]
-        
-        test_start_time = time.time()
-        
+
+        start_time = time.time()
+
         with torch.no_grad():
-            for i, fpath in enumerate(test_files, start=1):
-                img_start_time = time.time()
+            for idx, fpath in enumerate(test_files, start=1):
+                img_start = time.time()
+                filename = os.path.basename(fpath)
 
-                # 1) Load the image as PIL
-                img = Image.open(fpath).convert("RGB")
+                # LR
+                lr_pil = Image.open(fpath).convert("RGB")
+                lr_tensor = transforms.ToTensor()(lr_pil).unsqueeze(0).to(self.cfg.device)
+                student_out = self.generator(lr_tensor).squeeze(0).cpu().clamp(0,1)
+                student_pil = transforms.ToPILImage()(student_out)
 
-                # 2) Student Upscale
-                #    (Apply the same transform pipeline => produce a tensor => feed generator)
-                inp_tensor = self.transform(img)  # shape [3,H,W]
-                inp_tensor = inp_tensor.unsqueeze(0).to(self.cfg.device)  # [1,3,H,W]
-                out_student = self.generator(inp_tensor)
-                out_student = out_student.squeeze(0).cpu().clamp(0,1)  # [3,H*,W*]
-                student_upscaled_pil = transforms.ToPILImage()(out_student)
+                # Teacher
+                teacher_path = os.path.join(test_teacher_dir, filename)
+                if os.path.exists(teacher_path):
+                    teacher_pil = Image.open(teacher_path).convert("RGB")
+                else:
+                    # If teacher doesn't exist, skip or handle
+                    teacher_pil = None
 
-                # 3) Teacher Upscale
-                #    (Use the teacher's "upscale_image()" function, which takes the LR PIL)
-                teacher_upscaled_pil = upscale_image(self.cfg, img)  # returns a PIL image
-
-                # 4) Plot LR | Student | Teacher side by side
+                # Plot side-by-side
                 fig, axs = plt.subplots(1, 3, figsize=(12, 4))
-                # Left: Low-res (original input)
-                axs[0].imshow(img)
-                axs[0].set_title("LR Input")
+                axs[0].imshow(lr_pil)
+                axs[0].set_title("LR")
                 axs[0].axis("off")
 
-                # Middle: Student
-                axs[1].imshow(student_upscaled_pil)
-                axs[1].set_title("Student Upscaled")
+                axs[1].imshow(student_pil)
+                axs[1].set_title("Student")
                 axs[1].axis("off")
 
-                # Right: Teacher
-                axs[2].imshow(teacher_upscaled_pil)
-                axs[2].set_title("Teacher Upscaled")
+                if teacher_pil:
+                    axs[2].imshow(teacher_pil)
+                    axs[2].set_title("Teacher")
+                else:
+                    axs[2].imshow(student_pil)
+                    axs[2].set_title("Teacher Missing")
                 axs[2].axis("off")
 
-                # Adjust layout & save figure
                 plt.tight_layout()
-                basename = os.path.basename(fpath)
-                save_name = os.path.splitext(basename)[0] + "_comparison.png"
-                save_path = os.path.join(result_folder, save_name)
-                plt.savefig(save_path, dpi=150)
+                out_name = os.path.splitext(filename)[0] + "_comparison.png"
+                out_path = os.path.join(result_folder, out_name)
+                plt.savefig(out_path, dpi=150)
                 plt.close(fig)
 
-                # Log timing
-                img_time = time.time() - img_start_time
-                self.logger.log(
-                    f"[Trainer] Upscaling {i}/{max_test_count} -> {save_name}  (Time: {img_time:.2f}s)"
-                )
+                elapsed = time.time() - img_start
+                self.logger.log(f"[Trainer] Test {idx}/{len(test_files)} => {out_name} (Time: {elapsed:.2f}s)")
 
-        total_time_str = time.strftime("%H:%M:%S", time.gmtime(time.time() - test_start_time))
-        self.logger.log(f"\n[Trainer] Test images saved to: {result_folder}")
+        total_time_str = time.strftime("%H:%M:%S", time.gmtime(time.time() - start_time))
         self.logger.log(f"[Trainer] Testing completed in {total_time_str}")
 
     def save_model(self, path):
-        torch.save(
-            {
-                "generator": self.generator.state_dict(),
-                "discriminator": self.discriminator.state_dict(),
-            },
-            path
-        )
+        torch.save({
+            "generator": self.generator.state_dict(),
+            "discriminator": self.discriminator.state_dict(),
+        }, path)
         self.logger.log(f"[Trainer] Model (G + D) saved to: {path}")

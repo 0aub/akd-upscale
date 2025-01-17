@@ -1,10 +1,56 @@
-python main.py --epochs 500 --loss l1
-python main.py --epochs 500 --loss mse
-python main.py --epochs 500 --loss vgg
-python main.py --epochs 500 --loss lpips
-python main.py --epochs 500 --loss bce
-python main.py --epochs 500 --loss mix
+# 1) Small Student, Mixed Loss, Basic Adam, No Scheduler
+python main.py \
+  --overwrite_teacher_data \
+  --exp_name "1_small_l1_vgg_no_scheduler" \
+  --generator_loss '{"vgg": 1.0, "l1": 0.1}' \
+  --discriminator_loss '{"vgg": 1.0, "l1": 0.1}'
 
 
+# 2) Medium Student, VGG + LPIPS Loss, AdamW, Step Scheduler
+python main.py \
+  --generator_base_channels 48 \
+  --generator_num_blocks 6 \
+  --exp_name "2_medium_vgg_lpips_stepLR" \
+  --generator_loss '{"vgg": 1.0, "lpips": 0.05}' \
+  --discriminator_loss '{"vgg": 1.0}' \
+  --generator_optimizer "AdamW" \
+  --generator_weight_decay 1e-5 \
+  --generator_scheduler "step" \
+  --discriminator_optimizer "AdamW" \
+  --discriminator_weight_decay 1e-5
 
+# 3) Tiny Model, Pure LPIPS + L1, RMSprop, Constant With Warmup
+python main.py \
+  --exp_name "3_tiny_lpips_l1_rmsprop_constantwarmup" \
+  --generator_loss '{"lpips": 1.0, "l1": 0.1}' \
+  --discriminator_loss '{"l1": 1.0}' \
+  --generator_optimizer "RMSprop" \
+  --discriminator_optimizer "RMSprop" \
+  --generator_betas 0.9 0.9 \
+  --discriminator_betas 0.9 0.9 \
+  --generator_scheduler "constant_with_warmup" \
+  --discriminator_scheduler "constant_with_warmup" \
+  --generator_warmup_steps 100 \
+  --discriminator_warmup_steps 100
 
+# 4) Bigger Generator, Strict MSE + VGG, CosineAnnealing
+python main.py \
+  --generator_base_channels 64 \
+  --generator_num_blocks 8 \
+  --exp_name "4_bigger_mse_vgg_cosine" \
+  --generator_loss '{"mse": 1.0, "vgg": 0.1}' \
+  --discriminator_loss '{"vgg": 1.0}' \
+  --generator_learning_rate 2e-4 \
+  --discriminator_learning_rate 2e-4 \
+  --generator_scheduler "cosine" \
+  --discriminator_scheduler "cosine"
+
+# 5) Mid-Range Model, Full Tri-Loss (L1+VGG+LPIPS), Adam, Exponential Decay
+python main.py \
+  --generator_base_channels 40 \
+  --generator_num_blocks 5 \
+  --exp_name "5_midrange_l1_vgg_lpips_expdecay" \
+  --generator_loss '{"l1": 0.5, "vgg": 0.4, "lpips": 0.1}' \
+  --discriminator_loss '{"l1": 1.0}' \
+  --generator_scheduler "exponential" \
+  --discriminator_scheduler "exponential"
