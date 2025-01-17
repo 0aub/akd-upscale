@@ -7,6 +7,18 @@ from torchvision import transforms
 
 from diffusers import StableDiffusionUpscalePipeline
 
+TEACHER_PIPELINE = None
+
+def load_teacher_pipeline(cfg):
+    global TEACHER_PIPELINE
+    if TEACHER_PIPELINE is None:
+        TEACHER_PIPELINE = StableDiffusionUpscalePipeline.from_pretrained(
+            cfg.model_id,
+            torch_dtype=torch.float32,
+            safety_checker=None
+        ).to(cfg.device)
+        TEACHER_PIPELINE.set_progress_bar_config(disable=True)
+    return TEACHER_PIPELINE
 
 class DownscaleByFactor:
     def __init__(self, factor: int):
@@ -17,7 +29,6 @@ class DownscaleByFactor:
         new_w = w // self.factor
         new_h = h // self.factor
         return img.resize((new_w, new_h), Image.BICUBIC)
-
 
 def prepare_low_res_images(cfg, logger):
     """
@@ -115,14 +126,7 @@ def generate_teacher_outputs(cfg, logger):
     
     # Otherwise, load pipeline
     logger.log("[Teacher]  Loading the teacher pipeline...")
-    teacher_pipeline = StableDiffusionUpscalePipeline.from_pretrained(
-        cfg.model_id, 
-        torch_dtype=torch.float32,
-        safety_checker=None
-    ).to(cfg.device)
-    
-    # Disable progress bar
-    teacher_pipeline.set_progress_bar_config(disable=True)
+    teacher_pipeline = load_teacher_pipeline(cfg)
     
     # --- Training teacher outputs ---
     if needed_train_paths:
@@ -163,3 +167,17 @@ def generate_teacher_outputs(cfg, logger):
             
             if (i+1) % 10 == 0:
                 logger.log(f"[Teacher]  Upscaling {i+1}/{len(needed_valid_paths)} validation images...")
+
+def upscale_image(cfg, lr_image):
+    teacher_pipeline = load_teacher_pipeline(cfg)
+
+    with torch.no_grad():
+        # The pipeline's call returns a PipelineOutput object. We take `.images[0]`.
+        upscaled_img = teacher_pipeline(
+            prompt=cfg.teacher_prompt,
+            image=lr_image,
+            num_inference_steps=cfg.num_inference_steps,
+            guidance_scale=cfg.guidance_scale
+        ).images[0]
+    
+    return upscaled_img

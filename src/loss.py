@@ -136,73 +136,35 @@ class LPIPS(nn.Module):
 
 class Loss(nn.Module):
     """
-    A single interface for these loss_name options:
-      - "l1": L1 Loss
-      - "mse": PyTorch's built-in MSELoss
-      - "vgg": Perceptual loss using VGG19 up to layer 36
-      - "lpips": Learned perceptual similarity
-      - "bce": Binary cross-entropy with logits
-      - "mix": A fixed weighted sum of L1 + VGG + LPIPS + BCE
-
-    Usage in training loop (example):
-      loss_fn = Loss(loss_name="combined")  # or "lpips", "l1", etc.
-      out = model(lr_img)
-      loss = loss_fn(out, teacher_img)
-      loss.backward()
-      optimizer.step()
+    Allows a combination of multiple sub-losses, each with its own weight.
+    E.g. loss_dict = {"vgg":1.0, "l1":0.1, "lpips":0.05}
     """
-    def __init__(self, cfg):
+    def __init__(self, loss_dict, device):
         super().__init__()
-        self.loss_name = cfg.loss.lower()
+        self.loss_funcs = {}
+        self.weights = {}
 
-        if self.loss_name == "l1":
-            self.criterion = nn.L1Loss()
-        elif self.loss_name == "mse":
-            self.criterion = nn.MSELoss()
-        elif self.loss_name == "vgg":
-            self.criterion = VGGLoss(cfg.device)
-        elif self.loss_name == "lpips":
-            self.criterion = LPIPS()
-        elif self.loss_name == "bce":
-            self.criterion = nn.BCEWithLogitsLoss()
-        elif self.loss_name == "mix":
-            # We'll define fixed weights for sub-losses here:
-            self.weight_l1 = cfg.weight_l1
-            self.weight_vgg = cfg.weight_vgg
-            self.weight_lpips = cfg.weight_lpips
-            self.weight_bce = cfg.weight_bce
-
-            self.l1_loss = nn.L1Loss()
-            self.vgg_loss = VGGLoss()
-            self.lpips_loss = LPIPS()
-            self.bce_loss = nn.BCEWithLogitsLoss()
-        else:
-            raise ValueError(f"Unsupported loss_name: {self.loss_name}")
+        # We'll store references to your existing VGG or LPIPS, or just nn.L1Loss, etc.
+        for loss_name, weight in loss_dict.items():
+            if loss_name.lower() == "l1":
+                self.loss_funcs[loss_name] = nn.L1Loss()
+                self.weights[loss_name] = weight
+            elif loss_name.lower() == "mse":
+                self.loss_funcs[loss_name] = nn.MSELoss()
+                self.weights[loss_name] = weight
+            elif loss_name.lower() == "vgg":
+                self.loss_funcs[loss_name] = VGGLoss(device)
+                self.weights[loss_name] = weight
+            elif loss_name.lower() == "lpips":
+                self.loss_funcs[loss_name] = LPIPS()
+                self.weights[loss_name] = weight
+            else:
+                raise ValueError(f"Unknown loss type: {loss_name}")
 
     def forward(self, pred, target):
-        """
-        - For "combined", we sum:
-             total = 1.0 * L1 + 0.1 * VGG + 0.05 * LPIPS + 0.05 * BCE
-          The BCE also uses (pred, target) on pixel space. 
-          (Unusual for SR, but you've requested it.)
-
-        - Otherwise, we do the single specified criterion.
-        """
-        if self.loss_name in ["l1", "l2", "mse", "vgg", "lpips", "bce"]:
-            return self.criterion(pred, target)
-
-        elif self.loss_name == "mix":
-            # Weighted sum of sub-losses
-            val_l1    = self.l1_loss(pred, target)
-            val_vgg   = self.vgg_loss(pred, target)
-            val_lpips = torch.mean(self.lpips_loss(pred, target))
-            val_bce   = self.bce_loss(pred, target)
-
-            total = (self.weight_l1    * val_l1
-                   + self.weight_vgg   * val_vgg
-                   + self.weight_lpips * val_lpips
-                   + self.weight_bce   * val_bce)
-            return total
-
-        else:
-            raise NotImplementedError(f"Unknown loss_name: {self.loss_name}")
+        total_loss = 0.0
+        for loss_name, func in self.loss_funcs.items():
+            w = self.weights[loss_name]
+            loss_val = func(pred, target)
+            total_loss += w * loss_val
+        return total_loss

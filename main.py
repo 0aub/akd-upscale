@@ -1,4 +1,5 @@
 import argparse
+import json
 import os
 
 import torch
@@ -8,6 +9,22 @@ import numpy as np
 from src.logger import Logger
 from src.teacher import prepare_low_res_images, generate_teacher_outputs
 from src.trainer import Trainer
+
+
+def parse_loss_weights(value):
+    """
+    Parse a string like '{"vgg": 1.0, "l1": 0.1}' into a dictionary.
+    """
+    try:
+        # Convert the string input to a dictionary using json.loads
+        loss_weights = json.loads(value)
+        # Validate that the values are floats or can be converted to floats
+        if not isinstance(loss_weights, dict) or not all(isinstance(v, (int, float)) for v in loss_weights.values()):
+            raise ValueError
+        return loss_weights
+    except (json.JSONDecodeError, ValueError):
+        raise argparse.ArgumentTypeError("Loss weights must be a valid JSON string, e.g., '{\"vgg\": 1.0, \"l1\": 0.1}'")
+
 
 def parse_arguments():
     parser = argparse.ArgumentParser(description="Knowledge Distillation with DIV2K + Stable Diffusion Upscaler")
@@ -34,8 +51,6 @@ def parse_arguments():
     # Training Hyperparameters
     parser.add_argument("--batch_size", type=int, default=1)
     parser.add_argument("--epochs", type=int, default=5)
-    parser.add_argument("--learning_rate", type=float, default=1e-4)
-    parser.add_argument("--weight_decay", type=float, default=0.0)
     parser.add_argument("--up_factor", type=int, default=4)
         
     # Experiment / Logging
@@ -43,19 +58,36 @@ def parse_arguments():
     parser.add_argument("--log_path", type=str, default="log")
 
     # Loss Function
-    parser.add_argument("--loss", type=str, default="l1", choices=["l1", "mse", "vgg", "lpips", "bce", "mix"])
-    parser.add_argument("--weight_l1", type=float, default=1.0)
-    parser.add_argument("--weight_vgg", type=float, default=0.1)
-    parser.add_argument("--weight_lpips", type=float, default=0.05)
-    parser.add_argument("--weight_bce", type=float, default=0.05)
+    parser.add_argument("--generator_loss", type=parse_loss_weights, default={"vgg":1.0, "l1":0.1},
+                        help="Loss weights as a JSON string, e.g., '{\"vgg\": 1.0, \"l1\": 0.1}'")
+    parser.add_argument("--discriminator_loss", type=parse_loss_weights, default={"vgg":1.0, "l1":0.1},
+                        help="Loss weights as a JSON string, e.g., '{\"vgg\": 1.0, \"l1\": 0.1}'")
     
-    # Optimizer & Scheduler
-    parser.add_argument("--optimizer", type=str, default="Adam", choices=["Adam", "SGD", "RMSprop", "AdamW"])
-    parser.add_argument("--scheduler", type=str, default=None,
+    # Generator Optimizer
+    parser.add_argument("--generator_optimizer", type=str, default="Adam", choices=["Adam", "SGD", "RMSprop", "AdamW"])
+    parser.add_argument("--generator_learning_rate", type=float, default=1e-4)
+    parser.add_argument("--generator_weight_decay", type=float, default=0.0)
+    parser.add_argument("--generator_betas", type=float, nargs=2, default=None)  # Two floats for betas
+    parser.add_argument("--generator_clip_max_norm", type=float, default=1.0)
+
+    # Generator Scheduler
+    parser.add_argument("--generator_scheduler", type=str, default=None,
                         choices=["step", "exponential", "cosine", "linear", "constant", "constant_with_warmup", None])
-    parser.add_argument("--warmup_ratio", type=float, default=0.1)
-    parser.add_argument("--warmup_steps", type=int, default=0)
-    parser.add_argument("--clip_max_norm", type=float, default=1.0)
+    parser.add_argument("--generator_warmup_ratio", type=float, default=0.1)
+    parser.add_argument("--generator_warmup_steps", type=int, default=0)
+
+    # Discriminator Optimizer
+    parser.add_argument("--discriminator_optimizer", type=str, default="Adam", choices=["Adam", "SGD", "RMSprop", "AdamW"])
+    parser.add_argument("--discriminator_learning_rate", type=float, default=1e-4)
+    parser.add_argument("--discriminator_weight_decay", type=float, default=0.0)
+    parser.add_argument("--discriminator_betas", type=float, nargs=2, default=None)  # Two floats for betas
+    parser.add_argument("--discriminator_clip_max_norm", type=float, default=1.0)
+
+    # Discriminator Scheduler
+    parser.add_argument("--discriminator_scheduler", type=str, default=None,
+                        choices=["step", "exponential", "cosine", "linear", "constant", "constant_with_warmup", None])
+    parser.add_argument("--discriminator_warmup_ratio", type=float, default=0.1)
+    parser.add_argument("--discriminator_warmup_steps", type=int, default=0)
     
     # Seed and Device
     parser.add_argument("--seed", type=int, default=1998)

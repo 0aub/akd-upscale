@@ -1,0 +1,10 @@
+python main.py --epochs 500 --loss l1
+python main.py --epochs 500 --loss mse
+python main.py --epochs 500 --loss vgg
+python main.py --epochs 500 --loss lpips
+python main.py --epochs 500 --loss bce
+python main.py --epochs 500 --loss mix
+
+
+
+
