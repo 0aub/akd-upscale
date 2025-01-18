@@ -35,8 +35,6 @@ python main.py \
   --discriminator_betas 0.9 0.9 \
   --generator_scheduler "constant_with_warmup" \
   --discriminator_scheduler "constant_with_warmup" \
-  --generator_warmup_steps 100 \
-  --discriminator_warmup_steps 100 \
   --epochs 100
 
 # 4) Bigger Generator, Strict MSE + VGG, CosineAnnealing
@@ -62,3 +60,18 @@ python main.py \
   --generator_scheduler "exponential" \
   --discriminator_scheduler "exponential" \
   --epochs 100
+
+
+
+
+python main.py \
+  --generator_base_channels 64 \
+  --generator_num_blocks 16 \
+  --exp_name "64-16-vgg-l1--l1-vgg-lpips-cosine" \
+  --generator_loss '{"vgg": 1.0, "l1": 0.1}' \
+  --discriminator_loss '{"l1": 0.5, "vgg": 0.5, "lpips": 0.5}' \
+  --generator_weight_decay 1e-4 \
+  --generator_scheduler "cosine" \
+  --discriminator_weight_decay 1e-6 \
+  --epochs 10 --batch_size 4 --log_freq 100
+   

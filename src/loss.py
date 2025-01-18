@@ -12,13 +12,18 @@ class VGGLoss(nn.Module):
     """
     def __init__(self, device):
         super().__init__()
-        self.vgg = models.vgg19(weights=models.VGG19_Weights.DEFAULT).features[:36].eval().to(device)
+        self.vgg = models.vgg19(weights=models.VGG19_Weights.DEFAULT).features.eval().to(device)
         for param in self.vgg.parameters():
             param.requires_grad = False
 
         self.criterion = nn.MSELoss()
 
     def forward(self, input_img, target_img):
+        if input_img.size(1) == 1:
+            input_img = input_img.repeat(1, 3, 1, 1)
+        if target_img.size(1) == 1:
+            target_img = target_img.repeat(1, 3, 1, 1)
+
         input_feats  = self.vgg(input_img)
         target_feats = self.vgg(target_img)
         return self.criterion(input_feats, target_feats)
@@ -55,9 +60,9 @@ class VGG16FeatureExtractor(nn.Module):
     Extracts intermediate features from VGG16 in 5 slices:
        relu1_2, relu2_2, relu3_3, relu4_3, relu5_3
     """
-    def __init__(self):
+    def __init__(self, device):
         super().__init__()
-        vgg16 = models.vgg16(weights=models.VGG16_Weights.DEFAULT).features
+        vgg16 = models.vgg16(weights=models.VGG16_Weights.DEFAULT).features.eval().to(device)
         self.slice1 = nn.Sequential(*[vgg16[i] for i in range(4)])
         self.slice2 = nn.Sequential(*[vgg16[i] for i in range(4,9)])
         self.slice3 = nn.Sequential(*[vgg16[i] for i in range(9,16)])
@@ -91,18 +96,18 @@ class LPIPS(nn.Module):
     The LPIPS distance (Learned Perceptual Image Patch Similarity).
     Uses a fixed VGG16 backbone, then linearly combines L2 distances in feature space.
     """
-    def __init__(self, use_dropout=True):
+    def __init__(self, device, use_dropout=True):
         super().__init__()
         self.scaling_layer = ScalingLayer()
-        self.vgg = VGG16FeatureExtractor()
+        self.vgg = VGG16FeatureExtractor(device)
         # VGG16 channels: [64,128,256,512,512]
         self.lins = nn.ModuleList([
             NetLinLayer(64, 1, use_dropout=use_dropout),
-            NetLinLayer(128,1, use_dropout=use_dropout),
-            NetLinLayer(256,1, use_dropout=use_dropout),
-            NetLinLayer(512,1, use_dropout=use_dropout),
-            NetLinLayer(512,1, use_dropout=use_dropout),
-        ])
+            NetLinLayer(128, 1, use_dropout=use_dropout),
+            NetLinLayer(256, 1, use_dropout=use_dropout),
+            NetLinLayer(512, 1, use_dropout=use_dropout),
+            NetLinLayer(512, 1, use_dropout=use_dropout),
+        ]).to(device)
         # load official LPIPS weights here
 
         for param in self.parameters():
@@ -156,7 +161,7 @@ class Loss(nn.Module):
                 self.loss_funcs[loss_name] = VGGLoss(device)
                 self.weights[loss_name] = weight
             elif loss_name.lower() == "lpips":
-                self.loss_funcs[loss_name] = LPIPS()
+                self.loss_funcs[loss_name] = LPIPS(device)
                 self.weights[loss_name] = weight
             else:
                 raise ValueError(f"Unknown loss type: {loss_name}")
@@ -166,5 +171,7 @@ class Loss(nn.Module):
         for loss_name, func in self.loss_funcs.items():
             w = self.weights[loss_name]
             loss_val = func(pred, target)
-            total_loss += w * loss_val
+            if loss_val.dim() > 0:
+                loss_val = loss_val.mean()
+            total_loss += w * loss_val.view(1)
         return total_loss

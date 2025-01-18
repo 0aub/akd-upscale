@@ -2,12 +2,13 @@ import os
 import glob
 import math
 import shutil 
+import time
 from PIL import Image
 import torch
 from diffusers import StableDiffusionUpscalePipeline
 
 
-class TeacherUpscaler:
+class Teacher:
     """
     1) Takes a single LR folder (cfg.lr_folder).
     2) Splits:
@@ -25,9 +26,9 @@ class TeacherUpscaler:
         self.teacher_pipeline = None
 
         # Make subfolders for LR
-        self.lr_train_dir = os.path.join(self.cfg.lr_folder, "train")
-        self.lr_val_dir   = os.path.join(self.cfg.lr_folder, "val")
-        self.lr_test_dir  = os.path.join(self.cfg.lr_folder, "test")
+        self.lr_train_dir = os.path.join(self.cfg.low_resolution_folder, "train")
+        self.lr_val_dir   = os.path.join(self.cfg.low_resolution_folder, "val")
+        self.lr_test_dir  = os.path.join(self.cfg.low_resolution_folder, "test")
 
         # Make subfolders for teacher
         self.teacher_train_dir = os.path.join(self.cfg.teacher_folder, "train")
@@ -41,7 +42,7 @@ class TeacherUpscaler:
 
     def load_teacher_pipeline(self):
         if self.teacher_pipeline is None:
-            self.logger.log("[Teacher]  Loading StableDiffusionUpscalePipeline...")
+            self.logger.log("\n[Teacher]  Loading StableDiffusionUpscalePipeline...")
             self.teacher_pipeline = StableDiffusionUpscalePipeline.from_pretrained(
                 self.cfg.model_id,
                 torch_dtype=torch.float32,
@@ -52,13 +53,13 @@ class TeacherUpscaler:
 
     def split_data(self):
         """
-        Splits the images in self.cfg.lr_folder (the "root" LR) as follows:
+        Splits the images in self.cfg.low_resolution_folder (the "root" LR) as follows:
           - first 100 => test
           - remainder => 80/20 => train/val
         Returns 3 lists: (test_list, train_list, val_list)
         """
         all_files = sorted(
-            f for f in glob.glob(os.path.join(self.cfg.lr_folder, "*"))
+            f for f in glob.glob(os.path.join(self.cfg.low_resolution_folder, "*"))
             if os.path.isfile(f)  # exclude subdirs
         )
 
@@ -66,7 +67,7 @@ class TeacherUpscaler:
         # We'll only split the top-level images.  If you want to handle that differently,
         # adapt as needed.
         # For safety, let's keep only those that are in the root folder (no slash).
-        root_files = [f for f in all_files if os.path.dirname(f) == self.cfg.lr_folder]
+        root_files = [f for f in all_files if os.path.dirname(f) == self.cfg.low_resolution_folder]
 
         if len(root_files) == 0:
             self.logger.log("[Teacher]  No top-level LR images found. Possibly already split?")
@@ -105,6 +106,7 @@ class TeacherUpscaler:
         shutil.move(src_path, dst_path)
 
     def run(self):
+        overall_start_time = time.time()
         test_list, train_list, val_list = self.split_data()
 
         # Move LR images into subfolders
@@ -125,7 +127,9 @@ class TeacherUpscaler:
         self.upscale_split(self.lr_val_dir,   self.teacher_val_dir,   "val")
         self.upscale_split(self.lr_test_dir,  self.teacher_test_dir,  "test")
 
-        self.logger.log("[Teacher]  Done splitting and upscaling.")
+        total_duration = time.time() - overall_start_time
+        total_duration_str = time.strftime("%M:%S", time.gmtime(total_duration))
+        self.logger.log(f"\n[Teacher]  Done splitting and upscaling all splits in {total_duration_str} (mm:ss).")
 
     def upscale_split(self, lr_dir, teacher_dir, split_name):
         """
@@ -133,13 +137,15 @@ class TeacherUpscaler:
         """
         lr_files = sorted(glob.glob(os.path.join(lr_dir, "*")))
         if not lr_files:
-            self.logger.log(f"[Teacher]  No LR images found in {lr_dir}, skip {split_name} upscaling.")
+            self.logger.log(f"\n[Teacher]  No LR images found in {lr_dir}, skip {split_name} upscaling.")
             return
         
         pipe = self.load_teacher_pipeline()
-        self.logger.log(f"[Teacher]  Upscaling {len(lr_files)} {split_name} images => {teacher_dir}")
+        self.logger.log(f"\n[Teacher]  Upscaling {len(lr_files)} {split_name} images => {teacher_dir}")
 
+        split_start_time = time.time()  # Start time for the split
         for i, path in enumerate(lr_files, start=1):
+            loop_start_time = time.time()  # Start time for each loop
             basename = os.path.basename(path)
             out_path = os.path.join(teacher_dir, basename)
 
@@ -156,6 +162,14 @@ class TeacherUpscaler:
                 ).images[0]
             out_img.save(out_path)
 
-            if i % 50 == 0:
-                self.logger.log(f"[Teacher]  {split_name} => {i}/{len(lr_files)} upscaled.")
+            # Calculate loop duration
+            loop_time = time.time() - loop_start_time
+            self.logger.log(
+                f"[Teacher]  {split_name} => {i}/{len(lr_files)} upscaled (Time: {loop_time:.2f}s)"
+            )
+
+        # Calculate total split duration
+        split_duration = time.time() - split_start_time
+        split_duration_str = time.strftime("%M:%S", time.gmtime(split_duration))
+        self.logger.log(f"[Teacher]  Completed upscaling {split_name} split in {split_duration_str} (mm:ss).")
 

@@ -7,7 +7,7 @@ import random
 import numpy as np
 
 from src.logger import Logger
-from src.teacher import TeacherUpscaler
+from src.teacher import Teacher
 from src.trainer import Trainer
 
 
@@ -30,27 +30,14 @@ def parse_arguments():
     parser = argparse.ArgumentParser(description="Knowledge Distillation with DIV2K + Stable Diffusion Upscaler")
     
     # Basic Dataset Paths
-    parser.add_argument("--low_resolution_folder", type=str, default="data/all_lr_images",
-                        help="Folder containing ALL low-res images.")
-    parser.add_argument("--teacher_folder", type=str, default="data/teacher_upscaled",
-                        help="Folder where teacher outputs will be saved (split into train/val/test subfolders).")
+    parser.add_argument("--low_resolution_folder", type=str, default="data/all_lr_images", help="Folder containing ALL low-res images.")
+    parser.add_argument("--teacher_folder", type=str, default="data/teacher_upscaled", help="Folder where teacher outputs will be saved (split into train/val/test subfolders).")
     parser.add_argument("--overwrite_teacher_data", action="store_true", default=False)
-
-    # Teacher Model Info
-    parser.add_argument("--model_id", type=str, default="stabilityai/stable-diffusion-x4-upscaler",
-                        help="HuggingFace model ID for the upscaler pipeline.")
-    parser.add_argument("--teacher_prompt", type=str, default="a photo")
-    parser.add_argument("--num_inference_steps", type=int, default=5)
-    parser.add_argument("--guidance_scale", type=float, default=0.0)
     
-    # Testing
-    parser.add_argument("--test_path", type=str, default="data/test/low_res")
-    parser.add_argument("--test_count", type=int, default=20)
-
     # Teacher Model Info
     parser.add_argument("--model_id", type=str, default="stabilityai/stable-diffusion-x4-upscaler")
     parser.add_argument("--teacher_prompt", type=str, default="a photo")
-    parser.add_argument("--num_inference_steps", type=int, default=5)
+    parser.add_argument("--num_inference_steps", type=int, default=20)
     parser.add_argument("--guidance_scale", type=float, default=0.0)
     
     # Generator parameters
@@ -69,18 +56,20 @@ def parse_arguments():
     # Experiment / Logging
     parser.add_argument("--exp_name", type=str, default="exp")
     parser.add_argument("--log_path", type=str, default="log")
+    parser.add_argument("--log_freq", type=int, default=10)
 
     # Loss Function
     parser.add_argument("--generator_loss", type=parse_loss_weights, default={"vgg":1.0, "l1":0.1},
                         help="Loss weights as a JSON string, e.g., '{\"vgg\": 1.0, \"l1\": 0.1}'")
     parser.add_argument("--discriminator_loss", type=parse_loss_weights, default={"vgg":1.0, "l1":0.1},
                         help="Loss weights as a JSON string, e.g., '{\"vgg\": 1.0, \"l1\": 0.1}'")
+    parser.add_argument("--adversarial_weight", type=float, default=1.0)
     
     # Generator Optimizer
     parser.add_argument("--generator_optimizer", type=str, default="Adam", choices=["Adam", "SGD", "RMSprop", "AdamW"])
     parser.add_argument("--generator_learning_rate", type=float, default=1e-4)
     parser.add_argument("--generator_weight_decay", type=float, default=0.0)
-    parser.add_argument("--generator_betas", type=float, nargs=2, default=None)  # Two floats for betas
+    parser.add_argument("--generator_betas", type=float, nargs=2, default=None)
     parser.add_argument("--generator_clip_max_norm", type=float, default=1.0)
 
     # Student Generator Scheduler
@@ -128,19 +117,17 @@ def main():
     # Log configuration
     logger.logline()
     logger.log_config(vars(cfg))
-
-    logger.logline()
-    trainer = Trainer(cfg, logger)
     
     # 1) Prepare LR images from HR
     logger.logline()
-    logger.log("[Teacher]  Generating Teacher Outputs")
-    upscaler = TeacherUpscaler(cfg, logger)
+    logger.log("[Teacher]  Preparing Teacher Outputs")
+    upscaler = Teacher(cfg, logger)
     upscaler.run() 
         
     # 3) Train the student model
     logger.logline()
     logger.log("[Student]  Student Adversarial Knowledge Distillation Training")
+    trainer = Trainer(cfg, logger)
     trainer.train()
 
     # 4) Train the student model

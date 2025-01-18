@@ -5,29 +5,27 @@ from torch.utils.data import Dataset
 
 class UpscaleDataset(Dataset):
     """
-    Returns (LR, Teacher) pairs.
+    Returns (LR, HR) pairs.
     """
-    def __init__(self, lr_folder, teacher_folder, transform=None):
-        super().__init__()
-        self.lr_paths = sorted(glob.glob(os.path.join(lr_folder, "*")))
-        self.teacher_paths = sorted(glob.glob(os.path.join(teacher_folder, "*")))
+    def __init__(self, lr_folder, hr_folder, transform=None):
+        self.lr_folder = lr_folder
+        self.hr_folder = hr_folder
+        self.lr_images = sorted(os.listdir(lr_folder))
+        self.hr_images = sorted(os.listdir(hr_folder))
         self.transform = transform
-        
-        if len(self.lr_paths) != len(self.teacher_paths):
-            print(f"[Warning] Mismatch: {len(self.lr_paths)} LR images, {len(self.teacher_paths)} teacher images.")
-    
+
     def __len__(self):
-        return len(self.lr_paths)
-    
+        return len(self.lr_images)
+
     def __getitem__(self, idx):
-        lr_path = self.lr_paths[idx]
-        teacher_path = self.teacher_paths[idx]
-        
+        lr_path = os.path.join(self.lr_folder, self.lr_images[idx])
+        hr_path = os.path.join(self.hr_folder, self.hr_images[idx])
+
         lr_img = Image.open(lr_path).convert("RGB")
-        teacher_img = Image.open(teacher_path).convert("RGB")
-        
+        hr_img = Image.open(hr_path).convert("RGB")
+
         if self.transform:
             lr_img = self.transform(lr_img)
-            teacher_img = self.transform(teacher_img)
-        
-        return lr_img, teacher_img
+            hr_img = self.transform(hr_img)
+
+        return lr_img, hr_img
