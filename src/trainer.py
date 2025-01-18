@@ -136,16 +136,14 @@ class Trainer:
         self.logger.log(f"\n[Trainer]  Training completed in {total_time}.\n")
 
     def _run_one_epoch(self, loader, training=True, epoch=1):
-        mode = "Train" if training else "Valid"
         if training:
             self.generator.train()
             self.discriminator.train()
+            self.logger.reset_metrics()
         else:
             self.generator.eval()
             self.discriminator.eval()
-
-        # Initialize metrics for the epoch
-        self.logger.reset_metrics()
+        
         time_elapsed = 0
 
         for step, (lr_img, teacher_img) in enumerate(loader, start=1):
@@ -165,7 +163,7 @@ class Trainer:
 
             # Log at specified intervals
             if step % self.cfg.log_freq == 0 or step == len(loader):
-                self.logger.log_step(epoch, step, len(loader), mode, time_elapsed, interval=True)
+                self.logger.log_step(epoch, step, len(loader), training, time_elapsed, interval=True)
                 self.logger.reset_metrics(interval=True)
                 time_elapsed = 0
 

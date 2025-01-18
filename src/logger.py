@@ -79,14 +79,21 @@ class Logger:
     def update_metrics(self, key, value, count=1):
         self.metrics.update(key, value, count)
 
-    def log_step(self, epoch, step, total_steps, mode, time_elapsed, interval=False):
-        self.log(
-            f"[Epoch {epoch} | {mode} Step {step}/{total_steps}] "
-            f"Loss | G: {self.metrics.average('g_loss', interval):.4f}, D: {self.metrics.average('d_loss', interval):.4f} || "
-            f"Grad Norm | G: {self.metrics.average('g_grad_norm', interval):.4f}, D: {self.metrics.average('d_grad_norm', interval):.4f} || "
-            f"LR | G: {sci(self.metrics.average('g_lr', interval))}, D: {sci(self.metrics.average('d_lr', interval))} || "
-            f"Time: {time_elapsed:.2f}s (Avg: {self.metrics.average('step_time', interval):.2f}s/Step)"
-        )
+    def log_step(self, epoch, step, total_steps, training, time_elapsed, interval=False):
+        if training:
+            self.log(
+                f"[Epoch {epoch} | Train Step {step}/{total_steps}] "
+                f"Loss | G: {self.metrics.average('g_loss', interval):.4f}, D: {self.metrics.average('d_loss', interval):.4f} || "
+                f"Grad Norm | G: {self.metrics.average('g_grad_norm', interval):.4f}, D: {self.metrics.average('d_grad_norm', interval):.4f} || "
+                f"LR | G: {sci(self.metrics.average('g_lr', interval))}, D: {sci(self.metrics.average('d_lr', interval))} || "
+                f"Time: {time_elapsed:.2f}s (Avg: {self.metrics.average('step_time', interval):.2f}s/Step)"
+            )
+        else:
+            self.log(
+                f"[Epoch {epoch} | Valid Step {step}/{total_steps}] "
+                f"Loss | G: {self.metrics.average('g_loss', interval):.4f} || "
+                f"Time: {time_elapsed:.2f}s (Avg: {self.metrics.average('step_time', interval):.2f}s/Step)"
+            )
 
     def log_epoch(self, epoch, epoch_duration):
         self.log(
