@@ -5,11 +5,7 @@ import os
 def sci(num):
     if num == 0:
         return '0.0'
-    magnitude = int(math.log10(abs(num)))
-    if magnitude < -3 or magnitude >= 3:
-        return '{:.0e}'.format(num)
-    else:
-        return str(round(num, 4 - magnitude))
+    return '{:.0e}'.format(num) 
 
 class Metrics:
     def __init__(self):
