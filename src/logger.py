@@ -41,16 +41,46 @@ class Metrics:
         return {k: self.average(k, interval=interval) for k in storage}
 
 class Logger:
-    def __init__(self, log_path, exp_name, save=True):
+    def __init__(self, log_path, exp_name, save=True, checkpoint=None, resume=False):
         self.save = save
-        self.log_time = time.strftime('%Y-%m-%d_%H-%M-%S')
-        self.exp_path = os.path.join(log_path, exp_name, self.log_time)
+        self.resume = resume
+        self.checkpoint = checkpoint
+        
+        if self.checkpoint:
+            self.exp_path = os.path.dirname(self.checkpoint)
+            self.log_time = os.path.basename(self.exp_path)
+        elif self.resume:
+            exp_dir = os.path.join(log_path, exp_name)
+            if os.path.exists(exp_dir):
+                # Find latest timestamp
+                subdirs = [d for d in os.listdir(exp_dir) if os.path.isdir(os.path.join(exp_dir, d))]
+                if subdirs:
+                    subdirs.sort()
+                    self.log_time = subdirs[-1]
+                    self.exp_path = os.path.join(exp_dir, self.log_time)
+                    init_log = f"[Logger]  Resuming from existing experiment: {self.exp_path}"
+                else:
+                    self.log_time = time.strftime('%Y-%m-%d_%H-%M-%S')
+                    self.exp_path = os.path.join(exp_dir, self.log_time)
+                    init_log = f"[Logger]  No existing experiment found. Creating new experiment: {self.exp_path}"
+            else:
+                self.log_time = time.strftime('%Y-%m-%d_%H-%M-%S')
+                self.exp_path = os.path.join(exp_dir, self.log_time)
+                init_log = f"[Logger]  No existing experiment found. Creating new experiment: {self.exp_path}"
+        else:
+            self.log_time = time.strftime('%Y-%m-%d_%H-%M-%S')
+            self.exp_path = os.path.join(log_path, exp_name, self.log_time)
+            init_log = f"[Logger]  Creating new experiment: {self.exp_path}"
 
+        # Create experiment directory if it doesn't exist
         if not os.path.exists(self.exp_path):
             os.makedirs(self.exp_path)
 
         self.log_file = os.path.join(self.exp_path, "log.txt")
         self.metrics = Metrics()
+
+        self.logline()
+        self.log(init_log)
 
     def log(self, message):
         current_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
@@ -95,12 +125,13 @@ class Logger:
                 f"Time: {time_elapsed:.2f}s (Avg: {self.metrics.average('step_time', interval):.2f}s/Step)"
             )
 
-    def log_epoch(self, epoch, epoch_duration):
+    def log_epoch(self, epoch, epoch_duration, best_g_loss, best_epoch):
         self.log(
             f"\n{'-'*50}\n"
             f"[Epoch {epoch}]:\n"
             f"\tTrain Loss | G: {self.metrics.average('train_g_loss'):.4f}, D: {self.metrics.average('train_d_loss'):.4f}\n"
-            f"\tVal Loss   | G: {self.metrics.average('val_g_loss'):.4f}\n"
-            f"\tTime       | {epoch_duration}s\n"
+            f"\tValid Loss | G: {self.metrics.average('val_g_loss'):.4f}\n"
+            f"\tBest  Loss | G: {best_g_loss:.4f} (epoch {best_epoch})\n"
+            f"\tTime       | {epoch_duration}\n"
             f"{'-'*50}\n"
         )

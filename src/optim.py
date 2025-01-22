@@ -23,10 +23,7 @@ class Optimizer:
         self.total_steps = self.num_train_steps * self.epochs
         self.warmup_steps = self._get_warmup_steps()
         
-        # Initialize the underlying optimizer
         self.optimizer = self._init_optimizer()
-        
-        # Initialize the scheduler (if any)
         self.scheduler = self._init_scheduler()
 
     def _init_optimizer(self):
@@ -82,3 +79,17 @@ class Optimizer:
     
     def clip_grad_norm(self, parameters):
         return clip_grad_norm_(parameters, self.clip_max_norm)
+
+    def state_dict(self):
+        """Returns the state of the optimizer and scheduler."""
+        return {
+            'optimizer': self.optimizer.state_dict(),
+            'scheduler': self.scheduler.state_dict() if self.scheduler else None
+        }
+
+    def load_state_dict(self, state_dict):
+        """Loads the state of the optimizer and scheduler."""
+        self.optimizer.load_state_dict(state_dict['optimizer'])
+        if self.scheduler and state_dict['scheduler']:
+            self.scheduler.load_state_dict(state_dict['scheduler'])
+

@@ -1,3 +1,5 @@
+# Adversarial Knowledge Distillation - Image Upscaling
+
 # test
 python main.py --epochs 1
 

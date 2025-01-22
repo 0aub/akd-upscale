@@ -27,7 +27,7 @@ def parse_loss_weights(value):
 
 
 def parse_arguments():
-    parser = argparse.ArgumentParser(description="Knowledge Distillation with DIV2K + Stable Diffusion Upscaler")
+    parser = argparse.ArgumentParser(description="Adversarial Knowledge Distillation + Stable Diffusion Upscaler")
     
     # Basic Dataset Paths
     parser.add_argument("--low_resolution_folder", type=str, default="data/all_lr_images", help="Folder containing ALL low-res images.")
@@ -57,6 +57,10 @@ def parse_arguments():
     parser.add_argument("--exp_name", type=str, default="exp")
     parser.add_argument("--log_path", type=str, default="log")
     parser.add_argument("--log_freq", type=int, default=10)
+
+    # Resume Training
+    parser.add_argument("--checkpoint", type=str, default=None, help="Path to a specific checkpoint file to load.")
+    parser.add_argument("--resume", action="store_true", help="Resume training from the latest checkpoint in the experiment directory.")
 
     # Loss Function
     parser.add_argument("--generator_loss", type=parse_loss_weights, default={"vgg":1.0, "l1":0.1},
@@ -112,7 +116,9 @@ def main():
     logger = Logger(
         log_path=cfg.log_path,
         exp_name=cfg.exp_name,
-        save=True  # saving logs to file
+        save=True,
+        checkpoint=cfg.checkpoint,
+        resume=cfg.resume,
     )
     # Log configuration
     logger.logline()
@@ -134,10 +140,7 @@ def main():
     logger.logline()
     logger.log("[Student]  Student and Teacher Testing")
     trainer.test()
-    
-    # 5) Save the final student model
-    trainer.save_model(os.path.join(logger.exp_path, "model.pth"))
-    
+        
 
 if __name__ == "__main__":
     main()

@@ -31,6 +31,21 @@ class Trainer:
         self.initialize_dataloaders()
         self.initialize_optimizers()
 
+        self.best_checkpoint = os.path.join(logger.exp_path, 'best.pth')
+        self.last_checkpoint = os.path.join(logger.exp_path, 'last.pth')
+        self.best_g_loss = float('inf')
+        self.best_epoch = 0
+
+        if cfg.checkpoint:
+            self.load_checkpoint(cfg.checkpoint)
+        elif cfg.resume:
+            checkpoint_path = os.path.join(logger.exp_path, "last.pth")
+            if os.path.exists(checkpoint_path):
+                self.load_checkpoint(checkpoint_path)
+            else:
+                logger.log(f"[Warning] No checkpoint found to resume at {checkpoint_path}")
+        
+
     def initialize_models(self):
         # Student generator & Discriminator
         self.logger.log(f"\n[Trainer]  Initializing Student (G + D)...")
@@ -123,14 +138,20 @@ class Trainer:
         self.logger.log("\n[Trainer]  Starting Training...\n")
         start_time = time.time()
 
-        for epoch in range(1, self.cfg.epochs + 1):
+        start_epoch = 1
+        if self.cfg.checkpoint:
+            start_epoch += self.resume_epoch
+
+        for epoch in range(start_epoch, self.cfg.epochs + 1):
             epoch_start_time = time.time()
 
             self._run_one_epoch(self.train_loader, training=True, epoch=epoch)
             self._run_one_epoch(self.valid_loader, training=False, epoch=epoch)
 
             epoch_duration = time.strftime('%H:%M:%S', time.gmtime(time.time() - epoch_start_time))
-            self.logger.log_epoch(epoch, epoch_duration)
+
+            self.save_checkpoint(epoch)
+            self.logger.log_epoch(epoch, epoch_duration, self.best_g_loss, self.best_epoch)
 
         total_time = time.strftime("%H:%M:%S", time.gmtime(time.time() - start_time))
         self.logger.log(f"\n[Trainer]  Training completed in {total_time}.\n")
@@ -246,7 +267,6 @@ class Trainer:
         self.logger.update_metrics('g_loss', g_loss.item())
         return g_loss.item()
 
-
     def test(self):
         result_folder = os.path.join(self.logger.exp_path, "results")
         os.makedirs(result_folder, exist_ok=True)
@@ -322,9 +342,49 @@ class Trainer:
         total_time_str = time.strftime("%H:%M:%S", time.gmtime(time.time() - cumulative_test_time))
         self.logger.log(f"\n[Trainer]  Testing completed in {total_time_str}")
 
-    def save_model(self, path):
-        torch.save({
-            "generator": self.generator.state_dict(),
-            "discriminator": self.discriminator.state_dict(),
-        }, path)
-        self.logger.log(f"[Trainer]  Model (G + D) saved to: {path}")
+    def save_checkpoint(self, epoch):
+        val_g_loss = self.logger.metrics.average('val_g_loss')
+        if val_g_loss < self.best_g_loss:
+            self.best_g_loss = val_g_loss
+            self.best_epoch = epoch
+            best = True
+        else:
+            best = False
+
+        if self.logger.save:
+            checkpoint = {
+                'epoch': epoch,
+                'best_epoch': self.best_epoch,
+                'best_g_loss': self.best_g_loss,
+                'generator': self.generator.state_dict(),
+                'discriminator': self.discriminator.state_dict(),
+                'g_optimizer': self.g_optimizer.state_dict(),
+                'd_optimizer': self.d_optimizer.state_dict(),
+            }
+            
+            if best:
+                torch.save(checkpoint, self.best_checkpoint)
+            else:
+                torch.save(checkpoint, self.last_checkpoint)
+
+    def load_checkpoint(self, checkpoint_path):
+        if os.path.isfile(checkpoint_path):
+            checkpoint = torch.load(checkpoint_path, map_location=self.cfg.device)
+            
+            # Load models
+            self.generator.load_state_dict(checkpoint['generator'])
+            self.discriminator.load_state_dict(checkpoint['discriminator'])
+            
+            # Load optimizers
+            self.g_optimizer.load_state_dict(checkpoint['g_optimizer'])
+            self.d_optimizer.load_state_dict(checkpoint['d_optimizer'])
+            
+            # Load training state
+            self.resume_epoch = checkpoint['epoch']
+            self.best_epoch = checkpoint['best_epoch']
+            self.best_g_loss = checkpoint['best_g_loss']           
+            
+            self.logger.log(f"[Trainer]  Loaded checkpoint from {checkpoint_path} (epoch {self.resume_epoch})")
+        else:
+            self.logger.log(f"[Trainer]  No checkpoint found at {checkpoint_path}!")
+
