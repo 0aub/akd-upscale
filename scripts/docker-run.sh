@@ -1,9 +1,18 @@
 #!/bin/bash
 
+# Source the .env file to load environment variables
+source ../.env
+
+# Check if GITHUB_REPO_NAME is set in the .env file
+if [ -z "$GITHUB_REPO_NAME" ]; then
+  echo "Error: GITHUB_REPO_NAME is not set in the .env file."
+  exit 1
+fi
+
 # Variables
-IMAGE_NAME="kd-upscale_image"               # Name of the Docker image
-CONTAINER_NAME="kd-upscale_container"       # Name of the Docker container
-FINAL_IMAGE_NAME="kd-upscale_image_final"   # Name of the final saved image
+IMAGE_NAME="${GITHUB_REPO_NAME}_docker_image"               # Name of the Docker image
+CONTAINER_NAME="${GITHUB_REPO_NAME}_docker_container"       # Name of the Docker container
+FINAL_IMAGE_NAME="${GITHUB_REPO_NAME}_docker_image_final"   # Name of the final saved image
 
 # Path to mount (change this to your project directory)
 HOST_DIR=$(pwd)         # Current directory on host

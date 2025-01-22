@@ -9,7 +9,7 @@ from PIL import Image
 import matplotlib.pyplot as plt
 
 from .dataset import UpscaleDataset
-from .model import LightweightSRModel, StrongPatchDiscriminator
+from .model import Generator, Discriminator
 from .optim import Optimizer
 from .loss import Loss
 
@@ -34,13 +34,13 @@ class Trainer:
     def initialize_models(self):
         # Student generator & Discriminator
         self.logger.log(f"\n[Trainer]  Initializing Student (G + D)...")
-        self.generator = LightweightSRModel(
+        self.generator = Generator(
             up_factor=self.cfg.generator_up_factor,
             base_ch=self.cfg.generator_base_channels,
-            num_blocks=self.cfg.generator_num_blocks
+            # num_blocks=self.cfg.generator_num_blocks
         ).to(self.cfg.device)
 
-        self.discriminator = StrongPatchDiscriminator(
+        self.discriminator = Discriminator(
             in_ch=self.cfg.discriminator_in_channels, 
             base_ch=self.cfg.discriminator_base_channels
         ).to(self.cfg.device)
@@ -152,9 +152,14 @@ class Trainer:
 
             # Run training or validation step
             if training:
-                self._train_step(lr_img, teacher_img)
+                g_loss, d_loss = self._train_step(lr_img, teacher_img)
+                # Accumulate train losses for the epoch
+                self.logger.update_metrics('train_g_loss', g_loss)
+                self.logger.update_metrics('train_d_loss', d_loss)
             else:
-                self._valid_step(lr_img, teacher_img)
+                g_loss = self._valid_step(lr_img, teacher_img)
+                # Accumulate validation loss for the epoch
+                self.logger.update_metrics('val_g_loss', g_loss)
 
             # Calculate step time
             step_time = time.time() - step_start_time
@@ -223,6 +228,7 @@ class Trainer:
         self.logger.update_metrics('g_loss', g_loss.item())
         self.logger.update_metrics('d_loss', d_loss.item())
 
+        return g_loss.item(), d_loss.item()
 
     def _valid_step(self, lr_img, teacher_img):
         """Perform a single validation step for generator."""
@@ -236,7 +242,9 @@ class Trainer:
             g_loss_content = self.g_criterion(fake_img, teacher_img).mean()
             g_loss_adv = self.cfg.adversarial_weight * self.d_criterion(fake_out_for_g, target_gen).mean()
             g_loss = g_loss_content + g_loss_adv
+
         self.logger.update_metrics('g_loss', g_loss.item())
+        return g_loss.item()
 
 
     def test(self):

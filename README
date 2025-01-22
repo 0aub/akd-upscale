@@ -67,9 +67,21 @@ python main.py \
   --generator_base_channels 64 \
   --generator_num_blocks 16 \
   --exp_name "64-16-vgg-l1--vgg-cosine" \
-  --generator_loss '{"vgg": 1.0, "l1": 0.1}' \
+  --generator_loss '{"vgg": 1.0, "l1": 0.5}' \
   --discriminator_loss '{"vgg": 1.0}' \
-  --generator_weight_decay 1e-4 \
+  --generator_learning_rate 5e-4 \
   --generator_scheduler "cosine" \
-  --discriminator_weight_decay 1e-6 \
-  --epochs 10 --batch_size 4 --log_freq 100
+  --discriminator_optimizer "RMSprop" \
+  --discriminator_learning_rate 1e-6 \
+  --epochs 100 --batch_size 4 --log_freq 100
+
+python main.py \
+  --generator_base_channels 64 \
+  --generator_num_blocks 16 \
+  --exp_name "64-16-vgg-l1--vgg-cosine" \
+  --generator_loss '{"vgg": 0.8, "l1": 0.5}' \
+  --discriminator_loss '{"vgg": 1.0}' \
+  --generator_learning_rate 5e-4 \
+  --generator_scheduler "cosine" \
+  --discriminator_learning_rate 1e-6 \
+  --epochs 100 --batch_size 4 --log_freq 100

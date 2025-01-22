@@ -98,7 +98,7 @@ class Logger:
     def log_epoch(self, epoch, epoch_duration):
         self.log(
             f"\n{'-'*50}\n"
-            f"[Epoch {epoch}] Summary:\n"
+            f"[Epoch {epoch}]:\n"
             f"\tTrain Loss | G: {self.metrics.average('train_g_loss'):.4f}, D: {self.metrics.average('train_d_loss'):.4f}\n"
             f"\tVal Loss   | G: {self.metrics.average('val_g_loss'):.4f}\n"
             f"\tTime       | {epoch_duration}s\n"
