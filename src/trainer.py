@@ -31,20 +31,67 @@ class Trainer:
         self.initialize_dataloaders()
         self.initialize_optimizers()
 
-        self.best_checkpoint = os.path.join(logger.exp_path, 'best.pth')
-        self.last_checkpoint = os.path.join(logger.exp_path, 'last.pth')
+        self.checkpoints_loading()
+        self.status_logging()
+
+    def checkpoints_loading(self):
+        if self.cfg.finetune:
+            self.best_checkpoint = os.path.join(self.logger.exp_path, 'finetuned_best.pth')
+            self.last_checkpoint = os.path.join(self.logger.exp_path, 'finetuned_last.pth')
+        else:
+            self.best_checkpoint = os.path.join(self.logger.exp_path, 'best.pth')
+            self.last_checkpoint = os.path.join(self.logger.exp_path, 'last.pth')
+
         self.best_g_loss = float('inf')
         self.best_epoch = 0
 
-        if cfg.checkpoint:
+        if self.cfg.checkpoint:
             self.load_checkpoint(cfg.checkpoint)
-        elif cfg.resume:
-            checkpoint_path = os.path.join(logger.exp_path, "last.pth")
+        elif self.cfg.resume or cfg.finetune:
+            checkpoint_path = os.path.join(self.logger.exp_path, "last.pth")
             if os.path.exists(checkpoint_path):
                 self.load_checkpoint(checkpoint_path)
             else:
-                logger.log(f"[Warning] No checkpoint found to resume at {checkpoint_path}")
+                self.logger.log(f"[Warning] No checkpoint found at {checkpoint_path}")
+
+    def status_logging(self):
+        self.logger.logsubline()
+
+        self.logger.log(f"[STATUS] • PyTorch version: {torch.__version__}")
+        self.logger.log(f"[STATUS] • CUDA available: {torch.cuda.is_available()}")
+        if torch.cuda.is_available():
+            self.logger.log(f"[STATUS] • CUDA version: {torch.version.cuda}")
+            self.logger.log(f"[STATUS] • GPU: {torch.cuda.get_device_name(0)}")
         
+        self.logger.logsubline()
+
+        mode = []
+        if self.cfg.finetune:
+            mode.append("FINE-TUNE MODE")
+            if self.cfg.checkpoint:
+                mode.append(f"Using pretrained weights from: {self.cfg.checkpoint}")
+            else:
+                mode.append("Using latest checkpoint from previous run")
+            mode.append("Optimizers will be reinitialized")
+        elif self.cfg.resume:
+            mode.append("RESUME MODE")
+            mode.append(f"Continuing from epoch {self.resume_epoch}")
+            mode.append(f"Best previous loss: {self.best_g_loss:.4f} (epoch {self.best_epoch})")
+        else:
+            mode.append("FRESH TRAINING MODE")
+        
+        self.logger.logsubline()
+
+        for txt in mode:
+            self.logger.log(f"[STATUS] • {txt}" )
+
+        self.logger.logsubline()
+        
+        self.logger.log(f"[STATUS] • Checkpoint paths:")
+        self.logger.log(f"[STATUS] • --> Last: {self.last_checkpoint}")
+        self.logger.log(f"[STATUS] • --> Best: {self.best_checkpoint}")
+
+        self.logger.logsubline()
 
     def initialize_models(self):
         # Student generator & Discriminator
@@ -344,12 +391,10 @@ class Trainer:
 
     def save_checkpoint(self, epoch):
         val_g_loss = self.logger.metrics.average('val_g_loss')
-        if val_g_loss < self.best_g_loss:
+        is_best = val_g_loss < self.best_g_loss
+        if is_best:
             self.best_g_loss = val_g_loss
             self.best_epoch = epoch
-            best = True
-        else:
-            best = False
 
         if self.logger.save:
             checkpoint = {
@@ -358,33 +403,36 @@ class Trainer:
                 'best_g_loss': self.best_g_loss,
                 'generator': self.generator.state_dict(),
                 'discriminator': self.discriminator.state_dict(),
-                'g_optimizer': self.g_optimizer.state_dict(),
-                'd_optimizer': self.d_optimizer.state_dict(),
             }
             
-            if best:
+            if not self.cfg.finetune:
+                checkpoint.update({
+                    'g_optimizer': self.g_optimizer.state_dict(),
+                    'd_optimizer': self.d_optimizer.state_dict(),
+                })
+
+            torch.save(checkpoint, self.last_checkpoint)
+
+            if is_best:
                 torch.save(checkpoint, self.best_checkpoint)
-            else:
-                torch.save(checkpoint, self.last_checkpoint)
 
     def load_checkpoint(self, checkpoint_path):
         if os.path.isfile(checkpoint_path):
             checkpoint = torch.load(checkpoint_path, map_location=self.cfg.device)
             
-            # Load models
+            # load models
             self.generator.load_state_dict(checkpoint['generator'])
             self.discriminator.load_state_dict(checkpoint['discriminator'])
             
-            # Load optimizers
-            self.g_optimizer.load_state_dict(checkpoint['g_optimizer'])
-            self.d_optimizer.load_state_dict(checkpoint['d_optimizer'])
+            # Only load optimizers and training state in resume mode
+            if not self.cfg.finetune:
+                self.g_optimizer.load_state_dict(checkpoint.get('g_optimizer', {}))
+                self.d_optimizer.load_state_dict(checkpoint.get('d_optimizer', {}))
+                self.resume_epoch = checkpoint.get('epoch', 0)
+                self.best_epoch = checkpoint.get('best_epoch', 0)
+                self.best_g_loss = checkpoint.get('best_g_loss', float('inf'))
             
-            # Load training state
-            self.resume_epoch = checkpoint['epoch']
-            self.best_epoch = checkpoint['best_epoch']
-            self.best_g_loss = checkpoint['best_g_loss']           
-            
-            self.logger.log(f"[Trainer]  Loaded checkpoint from {checkpoint_path} (epoch {self.resume_epoch})")
+            log_msg = f"Loaded {'finetune' if self.cfg.finetune else 'training'} checkpoint"
+            self.logger.log(f"[Trainer]  {log_msg} from {checkpoint_path}")
         else:
             self.logger.log(f"[Trainer]  No checkpoint found at {checkpoint_path}!")
-

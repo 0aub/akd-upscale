@@ -37,46 +37,70 @@ class Metrics:
         return {k: self.average(k, interval=interval) for k in storage}
 
 class Logger:
-    def __init__(self, log_path, exp_name, save=True, checkpoint=None, resume=False):
+    def __init__(self, log_path, exp_name, save=True, checkpoint=None, resume=False, finetune=False):
         self.save = save
         self.resume = resume
+        self.finetune = finetune
         self.checkpoint = checkpoint
-        
+        self.exp_path = None
+        self.log_time = None
+
+        # Resolve experiment path and training mode
+        init_log = []
+        base_exp_dir = os.path.join(log_path, exp_name)
+
+        # Case 1: Explicit checkpoint path provided
         if self.checkpoint:
+            if not os.path.exists(self.checkpoint):
+                raise FileNotFoundError(f"[Logger]  Checkpoint file not found: {self.checkpoint}")
+                
             self.exp_path = os.path.dirname(self.checkpoint)
             self.log_time = os.path.basename(self.exp_path)
-        elif self.resume:
-            exp_dir = os.path.join(log_path, exp_name)
-            if os.path.exists(exp_dir):
-                # Find latest timestamp
-                subdirs = [d for d in os.listdir(exp_dir) if os.path.isdir(os.path.join(exp_dir, d))]
-                if subdirs:
-                    subdirs.sort()
-                    self.log_time = subdirs[-1]
-                    self.exp_path = os.path.join(exp_dir, self.log_time)
-                    init_log = f"[Logger]  Resuming from existing experiment: {self.exp_path}"
-                else:
-                    self.log_time = time.strftime('%Y-%m-%d_%H-%M-%S')
-                    self.exp_path = os.path.join(exp_dir, self.log_time)
-                    init_log = f"[Logger]  No existing experiment found. Creating new experiment: {self.exp_path}"
+            init_log.append(f"[Logger]  Loading explicit checkpoint: {self.checkpoint}")
+            
+            if self.finetune:
+                self.exp_path = os.path.join(self.exp_path, "finetune")
+                init_log.append("[Logger]  Entering finetune mode - creating finetune subdirectory")
+                
+        # Case 2: Resume or finetune without explicit checkpoint
+        elif self.resume or self.finetune:
+            if not os.path.exists(base_exp_dir):
+                raise FileNotFoundError(f"[Logger]  Experiment directory not found: {base_exp_dir}")
+                
+            # Find latest experiment
+            subdirs = [d for d in sorted(os.listdir(base_exp_dir)) 
+                      if os.path.isdir(os.path.join(base_exp_dir, d))]
+            
+            if not subdirs:
+                raise FileNotFoundError(f"[Logger]  No existing runs found in {base_exp_dir}")
+                
+            self.log_time = subdirs[-1]
+            self.exp_path = os.path.join(base_exp_dir, self.log_time)
+            
+            if self.finetune:
+                self.exp_path = os.path.join(self.exp_path, "finetune")
+                init_log.append(f"[Logger]  Starting finetune from {self.log_time}")
             else:
-                self.log_time = time.strftime('%Y-%m-%d_%H-%M-%S')
-                self.exp_path = os.path.join(exp_dir, self.log_time)
-                init_log = f"[Logger]  No existing experiment found. Creating new experiment: {self.exp_path}"
+                init_log.append(f"[Logger]  Resuming training from {self.log_time}")
+                
+        # Case 3: Fresh training
         else:
             self.log_time = time.strftime('%Y-%m-%d_%H-%M-%S')
-            self.exp_path = os.path.join(log_path, exp_name, self.log_time)
-            init_log = f"[Logger]  Creating new experiment: {self.exp_path}"
+            self.exp_path = os.path.join(base_exp_dir, self.log_time)
+            init_log.append(f"[Logger]  Starting new experiment: {self.log_time}")
 
-        # Create experiment directory if it doesn't exist
-        if not os.path.exists(self.exp_path):
-            os.makedirs(self.exp_path)
+        # Create directory structure
+        os.makedirs(self.exp_path, exist_ok=True)
+        init_log.append(f"[Logger]  Experiment path: {self.exp_path}")
 
+        # Set up log file
         self.log_file = os.path.join(self.exp_path, "log.txt")
         self.metrics = Metrics()
 
+        # Write initial logs
         self.logline()
-        self.log(init_log)
+        for txt in init_log:
+            self.log(txt)
 
     def log(self, message):
         current_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
@@ -88,13 +112,16 @@ class Logger:
                     print(f"# {current_time} # {line}", flush=True, file=f)
 
     def log_config(self, config):
-        self.log("[INFO]  Configuration:")
+        self.log("[Logger]  Configuration:")
         max_key_length = max(len(key) for key in config.keys())
         for key, value in config.items():
             self.log(f"\t -> {key.ljust(max_key_length)}: {value}")
 
     def logline(self):
-        self.log('\n' + '=' * 50 + '\n')
+        self.log('\n' + '-' * 50 + '\n')
+
+    def logsubline(self):
+        self.log('\n' + '-' * 50 + '\n')
 
     def reset_metrics(self, interval=False):
         if interval:

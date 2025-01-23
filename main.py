@@ -59,8 +59,9 @@ def parse_arguments():
     parser.add_argument("--log_freq", type=int, default=10)
 
     # Resume Training
-    parser.add_argument("--checkpoint", type=str, default=None, help="Path to a specific checkpoint file to load.")
-    parser.add_argument("--resume", action="store_true", help="Resume training from the latest checkpoint in the experiment directory.")
+    parser.add_argument("--resume", action="store_true", help="Resume training with full state (models + optimizers + training metadata)")
+    parser.add_argument("--finetune", action="store_true", help="Fine-tune models from checkpoint (load only models, ignore optimizers/training state)")
+    parser.add_argument("--checkpoint", type=str, default=None, help="Path to checkpoint file (required for finetuning, optional for resume)")
 
     # Loss Function
     parser.add_argument("--generator_loss", type=parse_loss_weights, default={"vgg":1.0, "l1":0.1},
@@ -119,6 +120,7 @@ def main():
         save=True,
         checkpoint=cfg.checkpoint,
         resume=cfg.resume,
+        finetune=cfg.finetune
     )
     # Log configuration
     logger.logline()
