@@ -46,8 +46,8 @@ class Trainer:
         self.best_epoch = 0
 
         if self.cfg.checkpoint:
-            self.load_checkpoint(cfg.checkpoint)
-        elif self.cfg.resume or cfg.finetune:
+            self.load_checkpoint(self.cfg.checkpoint)
+        elif self.cfg.resume or self.cfg.finetune:
             checkpoint_path = os.path.join(self.logger.exp_path, "last.pth")
             if os.path.exists(checkpoint_path):
                 self.load_checkpoint(checkpoint_path)
@@ -80,8 +80,6 @@ class Trainer:
         else:
             mode.append("FRESH TRAINING MODE")
         
-        self.logger.logsubline()
-
         for txt in mode:
             self.logger.log(f"[STATUS] • {txt}" )
 
@@ -418,19 +416,19 @@ class Trainer:
 
     def load_checkpoint(self, checkpoint_path):
         if os.path.isfile(checkpoint_path):
-            checkpoint = torch.load(checkpoint_path, map_location=self.cfg.device)
+            checkpoint = torch.load(checkpoint_path, map_location=self.cfg.device, weights_only=True)
             
             # load models
             self.generator.load_state_dict(checkpoint['generator'])
             self.discriminator.load_state_dict(checkpoint['discriminator'])
-            
             # Only load optimizers and training state in resume mode
             if not self.cfg.finetune:
                 self.g_optimizer.load_state_dict(checkpoint.get('g_optimizer', {}))
                 self.d_optimizer.load_state_dict(checkpoint.get('d_optimizer', {}))
-                self.resume_epoch = checkpoint.get('epoch', 0)
-                self.best_epoch = checkpoint.get('best_epoch', 0)
-                self.best_g_loss = checkpoint.get('best_g_loss', float('inf'))
+
+            self.resume_epoch = checkpoint.get('epoch', 0)
+            self.best_epoch = checkpoint.get('best_epoch', 0)
+            self.best_g_loss = checkpoint.get('best_g_loss', float('inf'))
             
             log_msg = f"Loaded {'finetune' if self.cfg.finetune else 'training'} checkpoint"
             self.logger.log(f"[Trainer]  {log_msg} from {checkpoint_path}")

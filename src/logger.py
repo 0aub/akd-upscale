@@ -1,5 +1,5 @@
+from datetime import datetime
 import time
-import math
 import os
 
 def sci(num):
@@ -44,63 +44,94 @@ class Logger:
         self.checkpoint = checkpoint
         self.exp_path = None
         self.log_time = None
+        self.parent_experiment = None
 
-        # Resolve experiment path and training mode
         init_log = []
-        base_exp_dir = os.path.join(log_path, exp_name)
+        base_log_dir = log_path
+        timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
 
-        # Case 1: Explicit checkpoint path provided
-        if self.checkpoint:
-            if not os.path.exists(self.checkpoint):
-                raise FileNotFoundError(f"[Logger]  Checkpoint file not found: {self.checkpoint}")
-                
-            self.exp_path = os.path.dirname(self.checkpoint)
-            self.log_time = os.path.basename(self.exp_path)
-            init_log.append(f"[Logger]  Loading explicit checkpoint: {self.checkpoint}")
+        # Handle fine-tuning
+        if self.finetune:
+            if not self.checkpoint:
+                raise ValueError("Finetune mode requires a checkpoint path")
             
-            if self.finetune:
-                self.exp_path = os.path.join(self.exp_path, "finetune")
-                init_log.append("[Logger]  Entering finetune mode - creating finetune subdirectory")
-                
-        # Case 2: Resume or finetune without explicit checkpoint
-        elif self.resume or self.finetune:
-            if not os.path.exists(base_exp_dir):
-                raise FileNotFoundError(f"[Logger]  Experiment directory not found: {base_exp_dir}")
-                
-            # Find latest experiment
-            subdirs = [d for d in sorted(os.listdir(base_exp_dir)) 
-                      if os.path.isdir(os.path.join(base_exp_dir, d))]
+            # Try to extract parent info, but don't fail if structure is different
+            self.parent_experiment = self._extract_parent_experiment()
             
-            if not subdirs:
-                raise FileNotFoundError(f"[Logger]  No existing runs found in {base_exp_dir}")
-                
-            self.log_time = subdirs[-1]
-            self.exp_path = os.path.join(base_exp_dir, self.log_time)
-            
-            if self.finetune:
-                self.exp_path = os.path.join(self.exp_path, "finetune")
-                init_log.append(f"[Logger]  Starting finetune from {self.log_time}")
+            if self.parent_experiment:
+                # Create nested structure if parent info exists
+                self.exp_path = os.path.join(
+                    self.parent_experiment['path'],
+                    "finetune",
+                    f"{exp_name}-{timestamp}"
+                )
+                init_log.extend([
+                    f"Parent Experiment: {self.parent_experiment['name']}",
+                    f"Parent Timestamp: {self.parent_experiment['timestamp']}"
+                ])
             else:
-                init_log.append(f"[Logger]  Resuming training from {self.log_time}")
-                
-        # Case 3: Fresh training
+                # Create normal experiment structure for external checkpoints
+                self.exp_path = os.path.join(
+                    base_log_dir,
+                    "finetune",
+                    f"{exp_name}-{timestamp}"
+                )
+                init_log.append("Using external checkpoint without known parent experiment")
+
+            init_log.append(f"Fine-tuning Path: {self.exp_path}")
+
+        # Handle resume/fresh training
         else:
-            self.log_time = time.strftime('%Y-%m-%d_%H-%M-%S')
-            self.exp_path = os.path.join(base_exp_dir, self.log_time)
-            init_log.append(f"[Logger]  Starting new experiment: {self.log_time}")
+            base_exp_dir = os.path.join(base_log_dir, exp_name)
+            
+            if self.resume:
+                if not os.path.exists(base_exp_dir):
+                    raise FileNotFoundError(f"Experiment directory not found: {base_exp_dir}")
+                
+                subdirs = [d for d in sorted(os.listdir(base_exp_dir)) 
+                         if os.path.isdir(os.path.join(base_exp_dir, d))]
+                
+                if not subdirs:
+                    raise FileNotFoundError(f"No existing runs in {base_exp_dir}")
+                    
+                self.log_time = subdirs[-1]
+                self.exp_path = os.path.join(base_exp_dir, self.log_time)
+                init_log.append(f"Resuming experiment: {exp_name}/{self.log_time}")
+                
+            else:
+                self.log_time = timestamp
+                self.exp_path = os.path.join(base_exp_dir, self.log_time)
+                init_log.append(f"New experiment: {exp_name}/{self.log_time}")
 
         # Create directory structure
         os.makedirs(self.exp_path, exist_ok=True)
-        init_log.append(f"[Logger]  Experiment path: {self.exp_path}")
-
-        # Set up log file
         self.log_file = os.path.join(self.exp_path, "log.txt")
         self.metrics = Metrics()
 
         # Write initial logs
         self.logline()
-        for txt in init_log:
-            self.log(txt)
+        for msg in init_log:
+            self.log(f"[Logger]  {msg}")
+
+    def _extract_parent_experiment(self):
+        """Try to extract parent experiment details, return None if fails"""
+        try:
+            path_parts = os.path.normpath(self.checkpoint).split(os.sep)
+            if 'log' not in path_parts:
+                return None
+                
+            log_idx = path_parts.index('log')
+            if len(path_parts) < log_idx + 3:
+                return None
+                
+            return {
+                'name': path_parts[log_idx + 1],
+                'timestamp': path_parts[log_idx + 2],
+                'path': os.path.join(*path_parts[:log_idx + 3])
+            }
+        except (IndexError, ValueError):
+            return None
+
 
     def log(self, message):
         current_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
