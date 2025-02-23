@@ -43,11 +43,22 @@ def parse_arguments():
     # Generator parameters
     parser.add_argument("--generator_up_factor", type=int, default=4, help="Upscaling factor for the generator")
     parser.add_argument("--generator_base_channels", type=int, default=32, help="Base number of channels in the generator")
-    parser.add_argument("--generator_num_blocks", type=int, default=4, help="Number of residual blocks in the generator")
-
+    parser.add_argument("--generator_attention", type=str, default=None, help="Attention type for the generator (e.g. 'se_layer', 'cbam', etc.)")
+    parser.add_argument("--generator_block_type", type=str, default="unet", help="Blocks type for the generator ('unet' or 'rdb')")
+    parser.add_argument("--generator_advanced_upsampling", action="store_true", default=False, help="Use advanced upsampling refinement block in the generator")
+    parser.add_argument("--generator_rdb_num_layers", type=int, default=4, help="Number of layers in each RDB block (if using RDB blocks)")
+    parser.add_argument("--generator_rdb_growth_rate", type=int, default=16, help="Growth rate for each RDB block (if using RDB blocks)")
+    
     # Discriminator parameters
     parser.add_argument("--discriminator_in_channels", type=int, default=3, help="Number of input channels for the discriminator")
     parser.add_argument("--discriminator_base_channels", type=int, default=64, help="Base number of channels in the discriminator")
+    parser.add_argument("--discriminator_attention", type=str, default=None, help="Attention type for the discriminator (e.g. 'se_layer', 'cbam', etc.)")
+    
+    # Discriminator training stability parameters
+    parser.add_argument("--discriminator_updates", type=int, default=1, help="Number of discriminator updates per generator update")
+    parser.add_argument("--use_gradient_penalty", action="store_true", help="Enable gradient penalty for the discriminator")
+    parser.add_argument("--gradient_penalty_weight", type=float, default=10.0, help="Weight for the gradient penalty term")
+    parser.add_argument("--label_smoothing", type=float, default=0.9, help="Label smoothing value for real images in discriminator training")
 
     # Training Hyperparameters
     parser.add_argument("--batch_size", type=int, default=1)
@@ -57,6 +68,7 @@ def parse_arguments():
     parser.add_argument("--exp_name", type=str, default="exp")
     parser.add_argument("--log_path", type=str, default="log")
     parser.add_argument("--log_freq", type=int, default=10)
+    parser.add_argument("--test_freq", type=int, default=None)
 
     # Resume Training
     parser.add_argument("--resume", action="store_true", help="Resume training with full state (models + optimizers + training metadata)")
@@ -64,10 +76,8 @@ def parse_arguments():
     parser.add_argument("--checkpoint", type=str, default=None, help="Path to checkpoint file (required for finetuning, optional for resume)")
 
     # Loss Function
-    parser.add_argument("--generator_loss", type=parse_loss_weights, default={"vgg":1.0, "l1":0.1},
-                        help="Loss weights as a JSON string, e.g., '{\"vgg\": 1.0, \"l1\": 0.1}'")
-    parser.add_argument("--discriminator_loss", type=parse_loss_weights, default={"vgg":1.0, "l1":0.1},
-                        help="Loss weights as a JSON string, e.g., '{\"vgg\": 1.0, \"l1\": 0.1}'")
+    parser.add_argument("--generator_loss", type=parse_loss_weights, default={"vgg":1.0, "l1":0.1}, help="Loss weights as a JSON string, e.g., '{\"vgg\": 1.0, \"l1\": 0.1}'")
+    parser.add_argument("--discriminator_loss", type=parse_loss_weights, default={"vgg":1.0, "l1":0.1}, help="Loss weights as a JSON string, e.g., '{\"vgg\": 1.0, \"l1\": 0.1}'")
     parser.add_argument("--adversarial_weight", type=float, default=1.0)
     
     # Generator Optimizer
@@ -100,12 +110,37 @@ def parse_arguments():
     parser.add_argument("--seed", type=int, default=1998)
     parser.add_argument("--device", type=str, default="cuda")
 
+
+    # inference-only arguments
+    parser.add_argument("--inference_only", action="store_true", default=False, help="Skip teacher data generation and training. Load a checkpoint and run inference only.")
+    parser.add_argument("--inference_input_path", type=str, default=None, help="Path to a single image, a directory of images, or a single video for inference.")
+    parser.add_argument("--inference_output_path", type=str, default=None, help="Path to output file (for single image/video) or folder (for a directory of images).")
+
+
     args = parser.parse_args()
     return args
 
 def main():
     # Parse arguments
     cfg = parse_arguments()
+
+    if cfg.inference_only:
+        if cfg.inference_input_path is None or cfg.inference_output_path is None:
+            raise ValueError("For inference_only, must specify both --inference_input_path and --inference_output_path.")
+
+        logger = Logger(
+            log_path=cfg.log_path,
+            exp_name=cfg.exp_name,
+            save=False,
+            checkpoint=cfg.checkpoint,
+            resume=False,
+            finetune=False
+        )
+
+        trainer = Trainer(cfg, logger)
+
+        trainer.inference(cfg.inference_input_path, cfg.inference_output_path)
+        return 
     
     random.seed(cfg.seed)
     np.random.seed(cfg.seed)

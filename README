@@ -1,30 +1,167 @@
 # Adversarial Knowledge Distillation - Image Upscaling
 
 
+
+
+
+
+ python main.py \
+    --generator_base_channels 64 \
+    --discriminator_base_channels 64 \
+    --exp_name "2- 4x-constant-3e-5-vgg" \
+    --generator_loss '{"l1":1.5, "vgg":0.5}' \
+    --discriminator_loss '{"vgg":1.0}' \
+    --adversarial_weight 0.005 \
+    --generator_learning_rate 3e-5 \
+    --discriminator_learning_rate 3e-6 \
+    --batch_size 8 \
+    --generator_scheduler "constant" \
+    --discriminator_scheduler "constant" \
+    --teacher_folder "data/teacher_upscaled_256" \
+    --epochs 100 --log_freq 100 --test_freq 10
+
+
+
+# ===================================
+
+
+
 python main.py \
-  --generator_base_channels 64 \
-  --generator_num_blocks 16 \
-  --exp_name "64-16-vgg-l1--vgg-cosine" \
-  --generator_loss '{"vgg": 0.8, "l1": 0.5}' \
-  --discriminator_loss '{"vgg": 1.0}' \
-  --generator_learning_rate 5e-4 \
-  --generator_scheduler "cosine" \
-  --discriminator_learning_rate 1e-6 \
-  --epochs 100 --batch_size 4 --log_freq 100
+    --generator_base_channels 64 \
+    --discriminator_base_channels 64 \
+    --generator_attention "se_layer" \
+    --discriminator_attention "cbam" \
+    --generator_advanced_upsampling \
+    --generator_rdb_num_layers 4 \
+    --generator_rdb_growth_rate 16 \
+    --exp_name "4x-advUpsample-se_cbam-mod" \
+    --generator_loss '{"l1":1.5, "vgg":0.5}' \
+    --discriminator_loss '{"vgg":1.0}' \
+    --adversarial_weight 0.005 \
+    --generator_learning_rate 3e-5 \
+    --discriminator_learning_rate 1e-6 \
+    --discriminator_weight_decay 1e-4 \
+    --batch_size 8 \
+    --generator_scheduler "constant" \
+    --discriminator_scheduler "constant" \
+    --teacher_folder "data/teacher_upscaled_256" \
+    --epochs 100 --log_freq 100 --test_freq 10
+
+
+
+
+
+python main.py \
+    --generator_base_channels 64 \
+    --discriminator_base_channels 64 \
+    --generator_attention "eca" \
+    --discriminator_attention "pam" \
+    --generator_advanced_upsampling \
+    --generator_rdb_num_layers 3 \
+    --generator_rdb_growth_rate 8 \
+    --exp_name "3- 4x-advUpsample-eca_pam" \
+    --generator_loss '{"l1":1.0, "vgg":0.7}' \
+    --discriminator_loss '{"vgg":1.0}' \
+    --adversarial_weight 0.005 \
+    --generator_learning_rate 2e-5 \
+    --discriminator_learning_rate 2e-6 \
+    --batch_size 8 \
+    --generator_scheduler "cosine" \
+    --discriminator_scheduler "cosine" \
+    --teacher_folder "data/teacher_upscaled_256" \
+    --epochs 300 --log_freq 100 --test_freq 10 --resume
+
+
 
 
 python main.py \
-  --exp_name "64-16-vgg-l1--vgg-cosine" \
-  --generator_base_channels 64 \
-  --generator_num_blocks 16 \
-  --checkpoint "./log/64-16-vgg-l1--vgg-cosine/2025-01-21_15-43-44/model.pth" \
-  --generator_loss '{"vgg": 0.9, "l1": 0.1}' \
-  --discriminator_loss '{"vgg": 0.8, "l1": 0.2}' \
-  --generator_learning_rate 2e-5 \
-  --discriminator_learning_rate 5e-7 \
-  --generator_optimizer "AdamW" \
-  --discriminator_optimizer "AdamW" \
-  --generator_weight_decay 0.01 \
-  --discriminator_weight_decay 0.01 \
-  --generator_scheduler "cosine" \
-  --epochs 50 --batch_size 4 --log_freq 100 --finetune
+    --generator_base_channels 64 \
+    --discriminator_base_channels 32 \
+    --generator_block_type rdb \
+    --generator_attention "eca" \
+    --discriminator_attention "cbam" \
+    --generator_advanced_upsampling \
+    --generator_rdb_num_layers 4 \
+    --generator_rdb_growth_rate 16 \
+    --exp_name "4x-RDB-se_cbam" \
+    --generator_loss '{"l1":1.5, "vgg":0.5}' \
+    --discriminator_loss '{"vgg":1.0}' \
+    --adversarial_weight 0.005 \
+    --generator_learning_rate 3e-5 \
+    --discriminator_learning_rate 1e-5 \
+    --discriminator_weight_decay 1e-4 \
+    --batch_size 8 \
+    --generator_scheduler "constant" \
+    --discriminator_scheduler "constant" \
+    --teacher_folder "data/teacher_upscaled_256" \
+    --epochs 100 --log_freq 100 --test_freq 10
+
+
+
+
+
+
+python main.py \
+    --generator_base_channels 64 \
+    --discriminator_in_channels 3 \
+    --discriminator_base_channels 32 \
+    --generator_block_type rdb \
+    --generator_attention "eca" \
+    --discriminator_attention "cbam" \
+    --generator_advanced_upsampling \
+    --generator_rdb_num_layers 4 \
+    --generator_rdb_growth_rate 16 \
+    --exp_name "4x-RDB-ECAB-cbam_v1" \
+    --generator_loss '{"l1":1.5, "vgg":0.5}' \
+    --discriminator_loss '{"vgg":1.0}' \
+    --adversarial_weight 0.005 \
+    --generator_learning_rate 3e-5 \
+    --discriminator_learning_rate 1e-5 \
+    --discriminator_weight_decay 1e-4 \
+    --batch_size 8 \
+    --generator_scheduler "constant" \
+    --discriminator_scheduler "constant" \
+    --teacher_folder "data/teacher_upscaled_256" \
+    --epochs 200 \
+    --log_freq 500 \
+    --test_freq 10 \
+    --label_smoothing 0.9
+
+
+/home/aub/boo/akd-upscale/log/4x-RDB-ECAB-cbam_v1/2025-02-20_20-38-15/best.pth
+
+
+python ./src/resize.py --input_path ./data/vid.mp4 --output_path ./data/vid64.mp4 --size 64
+python main.py \
+    --generator_base_channels 64 \
+    --discriminator_in_channels 3 \
+    --discriminator_base_channels 32 \
+    --generator_block_type rdb \
+    --generator_attention "eca" \
+    --discriminator_attention "cbam" \
+    --generator_advanced_upsampling \
+    --generator_rdb_num_layers 4 \
+    --generator_rdb_growth_rate 16 \
+    --inference_only \
+    --checkpoint ./log/4x-RDB-ECAB-cbam_v1/2025-02-20_20-38-15/best.pth \
+    --inference_input_path ./data/vid64.mp4 \
+    --inference_output_path ./data/vid_upscaled256.mp4
+
+
+
+
+python ./src/resize.py --input_path ./data/vvid.mp4 --output_path ./data/vvid64.mp4 --size 64
+python main.py \
+    --generator_base_channels 64 \
+    --discriminator_in_channels 3 \
+    --discriminator_base_channels 32 \
+    --generator_block_type rdb \
+    --generator_attention "eca" \
+    --discriminator_attention "cbam" \
+    --generator_advanced_upsampling \
+    --generator_rdb_num_layers 4 \
+    --generator_rdb_growth_rate 16 \
+    --inference_only \
+    --checkpoint ./log/4x-RDB-ECAB-cbam_v1/2025-02-20_20-38-15/best.pth \
+    --inference_input_path ./data/vvid64.mp4 \
+    --inference_output_path ./data/vvid_upscaled256.mp4

@@ -1,7 +1,8 @@
 #!/bin/bash
 
 # Source the .env file to load environment variables
-source ../.env
+source .env
+echo "Current working directory: $(pwd)"
 
 # Check if GITHUB_REPO_NAME is set in the .env file
 if [ -z "$GITHUB_REPO_NAME" ]; then
